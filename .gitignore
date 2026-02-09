@@ -1,0 +1,9 @@
+/bin/
+/dist/
+/tmp/
+/vendor/
+*.exe
+*.test
+*.out
+*.log
+config.json
