@@ -77,13 +77,6 @@ func resolveRegistry(registryHost, configPath string) (registry.Auth, string, []
 	}
 
 	ctx := cfg.Contexts[0]
-	if len(cfg.Contexts) > 1 {
-		selected, err := selectContextTUI(cfg.Contexts)
-		if err != nil {
-			return registry.Auth{}, "", nil, "", err
-		}
-		ctx = selected
-	}
 
 	contexts := make([]tui.ContextOption, 0, len(cfg.Contexts))
 	for _, ctx := range cfg.Contexts {

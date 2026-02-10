@@ -51,6 +51,10 @@ type Model struct {
 	focus   Focus
 	context string
 
+	contextSelectionActive bool
+	contextSelectionIndex  int
+	contextSelectionError  string
+
 	confirmAction  confirmAction
 	confirmTitle   string
 	confirmMessage string
@@ -165,31 +169,58 @@ type initClientMsg struct {
 type logMsg string
 
 var (
-	colorPrimary  = lipgloss.Color("62")
-	colorMuted    = lipgloss.Color("241")
-	colorAccent   = lipgloss.Color("204")
-	colorSelected = lipgloss.Color("229")
+	colorPrimary   = lipgloss.Color("39")
+	colorAccent    = lipgloss.Color("214")
+	colorMuted     = lipgloss.Color("244")
+	colorSelected  = lipgloss.Color("16")
+	colorBorder    = lipgloss.Color("74")
+	colorSurface   = lipgloss.Color("236")
+	colorSurface2  = lipgloss.Color("234")
+	colorTitleText = lipgloss.Color("230")
+	colorSuccess   = lipgloss.Color("78")
 )
 
 var (
-	titleStyle             = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
-	labelStyle             = lipgloss.NewStyle().Foreground(colorMuted)
-	helpStyle              = lipgloss.NewStyle().Foreground(colorMuted)
-	filterStyle            = lipgloss.NewStyle().Foreground(colorAccent)
+	modalColorPrimary  = lipglossv2.Color("39")
+	modalColorAccent   = lipglossv2.Color("214")
+	modalColorMuted    = lipglossv2.Color("244")
+	modalColorBorder   = lipglossv2.Color("74")
+	modalColorSurface  = lipglossv2.Color("236")
+	modalColorSurface2 = lipglossv2.Color("234")
+	modalColorTitle    = lipglossv2.Color("230")
+	modalColorDanger   = lipglossv2.Color("196")
+)
+
+var (
+	titleStyle             = lipgloss.NewStyle().Foreground(colorTitleText).Background(colorPrimary).Bold(true).Padding(0, 1).MarginRight(1)
+	statusStyle            = lipgloss.NewStyle().Foreground(colorTitleText).Background(colorSurface2).Padding(0, 1)
+	statusLoadingStyle     = lipgloss.NewStyle().Foreground(colorSurface2).Background(colorSuccess).Bold(true).Padding(0, 1)
+	metaLabelStyle         = lipgloss.NewStyle().Foreground(colorMuted).Bold(true).MarginRight(1)
+	metaValueStyle         = lipgloss.NewStyle().Foreground(colorTitleText).MarginRight(2)
+	modeInputStyle         = lipgloss.NewStyle().Foreground(colorAccent).Background(colorSurface2).Padding(0, 1)
 	emptyStyle             = lipgloss.NewStyle().Foreground(colorMuted).Italic(true)
-	logTitleStyle          = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
-	logBoxStyle            = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1)
-	modalBackdropStyle     = lipglossv2.NewStyle().Faint(true)
-	modalPanelStyle        = lipglossv2.NewStyle().BorderStyle(lipglossv2.RoundedBorder()).BorderForeground(lipglossv2.Color("62")).Padding(1, 2)
-	modalTitleStyle        = lipglossv2.NewStyle().Foreground(lipglossv2.Color("62")).Bold(true)
-	modalLabelStyle        = lipglossv2.NewStyle().Foreground(lipglossv2.Color("241"))
-	modalErrorStyle        = lipglossv2.NewStyle().Foreground(lipglossv2.Color("204"))
-	modalFocusStyle        = lipglossv2.NewStyle().Foreground(lipglossv2.Color("204")).Bold(true)
-	modalButtonStyle       = lipglossv2.NewStyle().Foreground(lipglossv2.Color("241"))
-	modalButtonFocusStyle  = lipglossv2.NewStyle().Foreground(lipglossv2.Color("229")).Bold(true)
-	modalHelpStyle         = lipglossv2.NewStyle().Foreground(lipglossv2.Color("241"))
-	modalDividerStyle      = lipglossv2.NewStyle().Foreground(lipglossv2.Color("238"))
-	modalDimmedActionStyle = lipglossv2.NewStyle().Foreground(lipglossv2.Color("240"))
+	sectionTitleStyle      = lipgloss.NewStyle().Foreground(colorTitleText).Background(colorBorder).Bold(true).Padding(0, 1)
+	topSectionStyle        = lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(colorBorder).Background(colorSurface).Padding(0, 1)
+	logTitleStyle          = lipgloss.NewStyle().Foreground(colorTitleText).Background(colorPrimary).Bold(true).Padding(0, 1)
+	logBoxStyle            = lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(colorBorder).Background(colorSurface).Padding(0, 1)
+	modalBackdropStyle     = lipglossv2.NewStyle().Foreground(modalColorMuted).Background(modalColorSurface2).Faint(true)
+	modalPanelStyle        = lipglossv2.NewStyle().BorderStyle(lipglossv2.DoubleBorder()).BorderForeground(modalColorBorder).Background(modalColorSurface).Padding(1, 2)
+	modalTitleStyle        = lipglossv2.NewStyle().Foreground(modalColorPrimary).Bold(true)
+	modalLabelStyle        = lipglossv2.NewStyle().Foreground(modalColorMuted)
+	modalErrorStyle        = lipglossv2.NewStyle().Foreground(modalColorDanger).Bold(true)
+	modalInputStyle        = lipglossv2.NewStyle().Foreground(modalColorTitle).Background(modalColorSurface2).BorderStyle(lipglossv2.NormalBorder()).BorderForeground(modalColorMuted).Padding(0, 1)
+	modalInputFocusStyle   = lipglossv2.NewStyle().Foreground(modalColorTitle).Background(modalColorSurface2).BorderStyle(lipglossv2.NormalBorder()).BorderForeground(modalColorAccent).Bold(true).Padding(0, 1)
+	modalFocusStyle        = lipglossv2.NewStyle().Foreground(modalColorAccent).Bold(true)
+	modalButtonStyle       = lipglossv2.NewStyle().Foreground(modalColorMuted).Background(modalColorSurface2).BorderStyle(lipglossv2.RoundedBorder()).BorderForeground(modalColorMuted).BorderBackground(modalColorSurface2).Padding(0, 1)
+	modalButtonFocusStyle  = lipglossv2.NewStyle().Foreground(modalColorSurface2).Background(modalColorAccent).BorderStyle(lipglossv2.RoundedBorder()).BorderForeground(modalColorAccent).BorderBackground(modalColorAccent).Bold(true).Padding(0, 1)
+	modalDangerButtonStyle = lipglossv2.NewStyle().Foreground(modalColorDanger).Background(modalColorSurface2).BorderStyle(lipglossv2.RoundedBorder()).BorderForeground(modalColorDanger).BorderBackground(modalColorSurface2).Padding(0, 1)
+	modalDangerFocusStyle  = lipglossv2.NewStyle().Foreground(modalColorSurface2).Background(modalColorDanger).BorderStyle(lipglossv2.RoundedBorder()).BorderForeground(modalColorDanger).BorderBackground(modalColorDanger).Bold(true).Padding(0, 1)
+	modalOptionStyle       = lipglossv2.NewStyle().Foreground(modalColorTitle).Background(modalColorSurface2).BorderStyle(lipglossv2.NormalBorder()).BorderForeground(modalColorMuted).BorderBackground(modalColorSurface2).Padding(0, 1)
+	modalOptionFocusStyle  = lipglossv2.NewStyle().Foreground(modalColorSurface2).Background(modalColorAccent).BorderStyle(lipglossv2.NormalBorder()).BorderForeground(modalColorAccent).BorderBackground(modalColorAccent).Bold(true).Padding(0, 1)
+	modalOptionMutedStyle  = lipglossv2.NewStyle().Foreground(modalColorMuted)
+	modalOptionErrorStyle  = lipglossv2.NewStyle().Foreground(modalColorDanger).Faint(true)
+	modalHelpStyle         = lipglossv2.NewStyle().Foreground(modalColorMuted)
+	modalDividerStyle      = lipglossv2.NewStyle().Foreground(modalColorBorder)
 )
 
 type ContextOption struct {
@@ -202,6 +233,9 @@ func NewModel(registryHost string, auth registry.Auth, logger registry.RequestLo
 	status := "Registry not configured"
 	if registryHost != "" {
 		status = fmt.Sprintf("Registry: %s", registryHost)
+	}
+	if strings.TrimSpace(currentContext) == "" && len(contexts) > 0 {
+		currentContext = contexts[0].Name
 	}
 
 	filter := textinput.New()
@@ -258,13 +292,25 @@ func NewModel(registryHost string, auth registry.Auth, logger registry.RequestLo
 	case "harbor":
 		username.SetValue(auth.Harbor.Username)
 	}
-	if provider.NeedsAuthPrompt(auth) {
-		username.Focus()
-	}
+	authRequired := provider.NeedsAuthPrompt(auth)
 
 	contextIndex := make(map[string]int, len(contexts))
 	for i, ctx := range contexts {
 		contextIndex[strings.ToLower(ctx.Name)] = i
+	}
+	contextSelectionActive := len(contexts) > 1
+	contextSelectionIndex := 0
+	if i, ok := contextIndex[strings.ToLower(strings.TrimSpace(currentContext))]; ok {
+		contextSelectionIndex = i
+	}
+	if contextSelectionActive {
+		status = "Select context to continue"
+	} else if authRequired {
+		username.Focus()
+	}
+	displayContext := currentContext
+	if contextSelectionActive {
+		displayContext = ""
 	}
 
 	return Model{
@@ -275,31 +321,33 @@ func NewModel(registryHost string, auth registry.Auth, logger registry.RequestLo
 			}
 			return FocusImages
 		}(),
-		context:          currentContext,
-		registryHost:     registryHost,
-		auth:             auth,
-		provider:         provider,
-		authRequired:     provider.NeedsAuthPrompt(auth),
-		authFocus:        0,
-		usernameInput:    username,
-		passwordInput:    password,
-		remember:         remember,
-		filterInput:      filter,
-		table:            tbl,
-		dockerHubInput:   dockerHubInput,
-		commandInput:     commandInput,
-		contexts:         contexts,
-		contextNameIndex: contextIndex,
-		debug:            debug,
-		logCh:            logCh,
-		logMax:           maxLogLines,
-		logger:           logger,
+		context:                displayContext,
+		contextSelectionActive: contextSelectionActive,
+		contextSelectionIndex:  contextSelectionIndex,
+		registryHost:           registryHost,
+		auth:                   auth,
+		provider:               provider,
+		authRequired:           authRequired,
+		authFocus:              0,
+		usernameInput:          username,
+		passwordInput:          password,
+		remember:               remember,
+		filterInput:            filter,
+		table:                  tbl,
+		dockerHubInput:         dockerHubInput,
+		commandInput:           commandInput,
+		contexts:               contexts,
+		contextNameIndex:       contextIndex,
+		debug:                  debug,
+		logCh:                  logCh,
+		logMax:                 maxLogLines,
+		logger:                 logger,
 	}
 }
 
 func (m Model) Init() tea.Cmd {
 	var cmds []tea.Cmd
-	if m.registryHost != "" && !m.authRequired {
+	if m.registryHost != "" && !m.authRequired && !m.isContextSelectionActive() {
 		cmds = append(cmds, initClientCmd(m.registryHost, m.auth, m.logger))
 	}
 	if m.logCh != nil {
@@ -316,6 +364,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.isConfirmModalActive() {
 			return m.handleConfirmKey(msg)
+		}
+		if m.isContextSelectionActive() {
+			return m.handleContextSelectionKey(msg)
 		}
 		if m.isAuthModalActive() {
 			return m.handleAuthKey(msg)
@@ -490,6 +541,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() string {
 	view := m.renderApp()
+	if m.isContextSelectionActive() {
+		view = m.renderModal(view, m.renderContextSelectionModal())
+	}
 	if m.isAuthModalActive() {
 		view = m.renderModal(view, m.renderAuthModal())
 	}
@@ -515,20 +569,48 @@ func (m Model) renderTopSection() string {
 	if contextName == "" {
 		contextName = "-"
 	}
-	statusLine := labelStyle.Render(fmt.Sprintf("Status: %s", m.status))
-	if m.isLoading() {
-		statusLine = filterStyle.Render(fmt.Sprintf("Status: [loading] %s", m.status))
+	statusValue := strings.TrimSpace(m.status)
+	if statusValue == "" {
+		statusValue = "-"
 	}
+	statusLine := statusStyle.Render(statusValue)
+	if m.isLoading() {
+		statusLine = statusLoadingStyle.Render("Loading")
+		if statusValue != "-" {
+			statusLine = statusLoadingStyle.Render("Loading " + statusValue)
+		}
+	}
+	pathValue := strings.TrimSpace(m.currentPath())
+	if pathValue == "" {
+		pathValue = "/"
+	}
+	headerLine := lipgloss.JoinHorizontal(lipgloss.Top, titleStyle.Render("Beacon"), statusLine)
+	metaLine := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		metaLabelStyle.Render("Context"),
+		metaValueStyle.Render(contextName),
+		metaLabelStyle.Render("Path"),
+		metaValueStyle.Render(pathValue),
+	)
 	lines := []string{
-		titleStyle.Render("Beacon"),
-		statusLine,
-		labelStyle.Render(fmt.Sprintf("Context: %s", contextName)),
-		labelStyle.Render(fmt.Sprintf("Path: %s", m.currentPath())),
+		headerLine,
+		metaLine,
 	}
 	if inputLine := m.renderModeInputLine(); inputLine != "" {
-		lines = append(lines, filterStyle.Render(inputLine))
+		lines = append(lines, modeInputStyle.Render(inputLine))
 	}
-	return strings.Join(lines, "\n")
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+	panelWidth := width - 2
+	if panelWidth < 24 {
+		panelWidth = width
+	}
+	if panelWidth < 1 {
+		panelWidth = 1
+	}
+	return topSectionStyle.Width(panelWidth).Render(strings.Join(lines, "\n"))
 }
 
 func (m Model) renderMainSection() string {
@@ -536,12 +618,17 @@ func (m Model) renderMainSection() string {
 	if width <= 0 {
 		width = 80
 	}
-	pageTitle := lipgloss.NewStyle().
-		Foreground(colorPrimary).
-		Bold(true).
-		Width(width).
+	titleWidth := width - 2
+	if titleWidth < 10 {
+		titleWidth = width
+	}
+	if titleWidth < 1 {
+		titleWidth = 1
+	}
+	pageTitle := sectionTitleStyle.
+		Width(titleWidth).
 		Align(lipgloss.Center).
-		Render(focusLabel(m.focus))
+		Render(strings.ToUpper(focusLabel(m.focus)))
 	return pageTitle + "\n" + m.renderBody()
 }
 
@@ -567,11 +654,67 @@ func (m Model) renderModeInputLine() string {
 	return ""
 }
 
-func (m Model) renderAuthModal() string {
+func (m Model) renderContextSelectionModal() string {
 	lines := []string{
-		modalTitleStyle.Render("Login"),
-		modalLabelStyle.Render(fmt.Sprintf("Registry: %s", m.registryHost)),
-		modalDividerStyle.Render(strings.Repeat("─", 18)),
+		modalTitleStyle.Render("Select Context"),
+		modalLabelStyle.Render("Choose a registry context to continue."),
+		modalDividerStyle.Render(strings.Repeat("─", 24)),
+	}
+	if m.contextSelectionError != "" {
+		lines = append(lines, modalErrorStyle.Render(m.contextSelectionError))
+	}
+	if len(m.contexts) == 0 {
+		lines = append(lines,
+			modalErrorStyle.Render("No contexts configured."),
+			"",
+			modalHelpStyle.Render("q quit"),
+		)
+		return m.renderModalCard(strings.Join(lines, "\n"), 84)
+	}
+
+	selected := clampInt(m.contextSelectionIndex, 0, len(m.contexts)-1)
+	for i, ctx := range m.contexts {
+		prefix := "  "
+		if i == selected {
+			prefix = "> "
+		}
+
+		name := contextDisplayName(ctx, i)
+		host := strings.TrimSpace(ctx.Host)
+		hostLabel := modalOptionMutedStyle.Render(host)
+		if host == "" {
+			hostLabel = modalOptionErrorStyle.Render("(no registry configured)")
+		}
+
+		row := prefix + lipglossv2.JoinHorizontal(
+			lipglossv2.Top,
+			name,
+			"  ",
+			hostLabel,
+		)
+
+		style := modalOptionStyle
+		if i == selected {
+			style = modalOptionFocusStyle
+		}
+		lines = append(lines, style.Render(row))
+	}
+	lines = append(lines,
+		"",
+		modalHelpStyle.Render("up/down move  enter select  q quit"),
+	)
+	return m.renderModalCard(strings.Join(lines, "\n"), 84)
+}
+
+func (m Model) renderAuthModal() string {
+	registryHost := strings.TrimSpace(m.registryHost)
+	if registryHost == "" {
+		registryHost = "-"
+	}
+	lines := []string{
+		modalTitleStyle.Render("Authentication Required"),
+		modalLabelStyle.Render(fmt.Sprintf("Registry  %s", registryHost)),
+		modalDividerStyle.Render(strings.Repeat("─", 24)),
 	}
 	if m.authError != "" {
 		lines = append(lines, modalErrorStyle.Render(m.authError))
@@ -579,22 +722,29 @@ func (m Model) renderAuthModal() string {
 
 	username := m.usernameInput.View()
 	password := m.passwordInput.View()
+	if m.authFocus == 0 {
+		username = modalInputFocusStyle.Render(username)
+	} else {
+		username = modalInputStyle.Render(username)
+	}
+	if m.authFocus == 1 {
+		password = modalInputFocusStyle.Render(password)
+	} else {
+		password = modalInputStyle.Render(password)
+	}
+
 	remember := ""
 	if m.authUI().ShowRemember {
-		remember = "[ ] Remember"
+		remember = "[ ] Remember session"
 		if m.remember {
-			remember = "[x] Remember"
+			remember = "[x] Remember session"
 		}
 	}
 
-	if m.authFocus == 0 {
-		username = modalFocusStyle.Render(username)
-	}
-	if m.authFocus == 1 {
-		password = modalFocusStyle.Render(password)
-	}
 	if m.authFocus == 2 && m.authUI().ShowRemember {
 		remember = modalFocusStyle.Render(remember)
+	} else if m.authUI().ShowRemember {
+		remember = modalLabelStyle.Render(remember)
 	}
 
 	help := "tab/shift+tab move  enter submit  q quit"
@@ -614,7 +764,7 @@ func (m Model) renderAuthModal() string {
 	}
 	lines = append(lines,
 		"",
-		modalHelpStyle.Render(help),
+		modalHelpStyle.Render(strings.ToUpper(help)),
 	)
 
 	return m.renderModalCard(strings.Join(lines, "\n"), 72)
@@ -625,23 +775,31 @@ func (m Model) renderConfirmModal() string {
 	if title == "" {
 		title = "Confirm action"
 	}
-	confirmLabel := "[ Confirm ]"
+	confirmLabel := "Confirm"
+	confirmButtonStyle := modalButtonStyle
+	confirmButtonFocusStyle := modalButtonFocusStyle
 	switch m.confirmAction {
 	case confirmActionQuit:
-		confirmLabel = "[ Quit ]"
+		confirmLabel = "Quit"
+		confirmButtonStyle = modalDangerButtonStyle
+		confirmButtonFocusStyle = modalDangerFocusStyle
 	}
 
-	cancel := "[ Cancel ]"
+	cancel := "Cancel"
 	if m.confirmFocus == 0 {
 		cancel = modalButtonFocusStyle.Render(cancel)
 	} else {
 		cancel = modalButtonStyle.Render(cancel)
 	}
+	confirm := confirmButtonStyle.Render(confirmLabel)
 	if m.confirmFocus == 1 {
-		confirmLabel = modalButtonFocusStyle.Render(confirmLabel)
-	} else {
-		confirmLabel = modalDimmedActionStyle.Render(confirmLabel)
+		confirm = confirmButtonFocusStyle.Render(confirmLabel)
 	}
+	buttonRow := lipglossv2.JoinHorizontal(
+		lipglossv2.Top,
+		lipglossv2.NewStyle().MarginRight(2).Render(cancel),
+		confirm,
+	)
 
 	lines := []string{
 		modalTitleStyle.Render(title),
@@ -651,7 +809,7 @@ func (m Model) renderConfirmModal() string {
 	}
 	lines = append(lines,
 		"",
-		cancel+"  "+confirmLabel,
+		buttonRow,
 		"",
 		modalHelpStyle.Render("tab/left/right move  enter choose  y/n quick select"),
 	)
@@ -705,8 +863,12 @@ func (m Model) modalViewport(base string) (int, int) {
 	return width, height
 }
 
+func (m Model) isContextSelectionActive() bool {
+	return m.contextSelectionActive && len(m.contexts) > 1
+}
+
 func (m Model) isAuthModalActive() bool {
-	return m.authRequired && m.registryClient == nil
+	return !m.isContextSelectionActive() && m.authRequired && m.registryClient == nil
 }
 
 func (m Model) isConfirmModalActive() bool {
@@ -726,7 +888,14 @@ func (m Model) renderLogs() string {
 	if width <= 0 {
 		width = 80
 	}
-	contentWidth := maxInt(20, width-6)
+	panelWidth := width - 2
+	if panelWidth < 24 {
+		panelWidth = width
+	}
+	if panelWidth < 1 {
+		panelWidth = 1
+	}
+	contentWidth := maxInt(10, panelWidth-6)
 
 	lines := []string{logTitleStyle.Render("Requests")}
 	visible := m.visibleLogs()
@@ -747,7 +916,7 @@ func (m Model) renderLogs() string {
 			lines = append(lines, "")
 		}
 	}
-	return logBoxStyle.Width(width).Render(strings.Join(lines, "\n"))
+	return logBoxStyle.Width(panelWidth).Render(strings.Join(lines, "\n"))
 }
 
 func (m Model) visibleLogs() []string {
@@ -769,6 +938,45 @@ func (m Model) currentPath() string {
 		return path
 	}
 	return "/"
+}
+
+func (m Model) handleContextSelectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if len(m.contexts) == 0 {
+		switch msg.String() {
+		case "ctrl+c", "q", "esc":
+			return m.openQuitConfirm()
+		}
+		return m, nil
+	}
+
+	switch msg.String() {
+	case "ctrl+c", "q", "esc":
+		return m.openQuitConfirm()
+	case "up", "k", "shift+tab":
+		m.contextSelectionIndex--
+		if m.contextSelectionIndex < 0 {
+			m.contextSelectionIndex = len(m.contexts) - 1
+		}
+		m.contextSelectionError = ""
+		return m, nil
+	case "down", "j", "tab":
+		m.contextSelectionIndex = (m.contextSelectionIndex + 1) % len(m.contexts)
+		m.contextSelectionError = ""
+		return m, nil
+	case "home", "g":
+		m.contextSelectionIndex = 0
+		m.contextSelectionError = ""
+		return m, nil
+	case "end", "G":
+		m.contextSelectionIndex = len(m.contexts) - 1
+		m.contextSelectionError = ""
+		return m, nil
+	case "enter":
+		selected := clampInt(m.contextSelectionIndex, 0, len(m.contexts)-1)
+		return m.switchContextAt(selected)
+	}
+
+	return m, nil
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1071,10 +1279,20 @@ func (m Model) switchContext(name string) (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("Unknown context: %s", name)
 		return m, nil
 	}
+	return m.switchContextAt(index)
+}
+
+func (m Model) switchContextAt(index int) (tea.Model, tea.Cmd) {
+	if index < 0 || index >= len(m.contexts) {
+		m.commandError = ""
+		m.status = "Invalid context selection"
+		return m, nil
+	}
 	ctx := m.contexts[index]
 	if ctx.Host == "" {
+		m.contextSelectionError = fmt.Sprintf("Context %s has no registry configured", contextDisplayName(ctx, index))
 		m.commandError = ""
-		m.status = fmt.Sprintf("Context %s has no registry configured", ctx.Name)
+		m.status = m.contextSelectionError
 		return m, nil
 	}
 
@@ -1084,8 +1302,11 @@ func (m Model) switchContext(name string) (tea.Model, tea.Cmd) {
 	m.commandMatches = nil
 	m.commandPrevFilterActive = false
 	m.commandPrevDockerHubSearch = false
+	m.contextSelectionActive = false
+	m.contextSelectionIndex = index
+	m.contextSelectionError = ""
 
-	m.context = ctx.Name
+	m.context = contextDisplayName(ctx, index)
 	m.registryHost = ctx.Host
 	m.auth = ctx.Auth
 	m.auth.Normalize()
@@ -1184,6 +1405,16 @@ func contextNames(contexts []ContextOption) []string {
 		}
 	}
 	return names
+}
+
+func contextDisplayName(ctx ContextOption, index int) string {
+	if name := strings.TrimSpace(ctx.Name); name != "" {
+		return name
+	}
+	if host := strings.TrimSpace(ctx.Host); host != "" {
+		return host
+	}
+	return fmt.Sprintf("context-%d", index+1)
 }
 
 func (m Model) handleAuthKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -2214,12 +2445,16 @@ func tableStyles() table.Styles {
 	styles := table.DefaultStyles()
 	styles.Header = styles.Header.
 		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(colorBorder).
 		BorderBottom(true).
-		Foreground(colorMuted).
+		Foreground(colorTitleText).
+		Background(colorSurface2).
 		Bold(true)
+	styles.Cell = styles.Cell.
+		Foreground(colorTitleText)
 	styles.Selected = styles.Selected.
 		Foreground(colorSelected).
-		Background(colorPrimary).
+		Background(colorAccent).
 		Bold(true)
 	return styles
 }
