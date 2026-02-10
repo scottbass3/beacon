@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -21,6 +22,37 @@ type DockerHubClient struct {
 	logger     RequestLogger
 }
 
+type DockerHubRateLimit struct {
+	Limit     int
+	Remaining int
+	ResetAt   time.Time
+}
+
+type DockerHubRateLimitError struct {
+	RetryAfter time.Duration
+	RateLimit  DockerHubRateLimit
+}
+
+func (e *DockerHubRateLimitError) Error() string {
+	if e == nil {
+		return "docker hub rate limit reached"
+	}
+	if e.RetryAfter > 0 {
+		return fmt.Sprintf("docker hub rate limit reached, retry after %s", e.RetryAfter.Round(time.Second))
+	}
+	if !e.RateLimit.ResetAt.IsZero() {
+		return fmt.Sprintf("docker hub rate limit reached, resets at %s", e.RateLimit.ResetAt.Local().Format(time.RFC3339))
+	}
+	return "docker hub rate limit reached"
+}
+
+type DockerHubTagsPage struct {
+	Image     string
+	Tags      []Tag
+	Next      string
+	RateLimit DockerHubRateLimit
+}
+
 func NewDockerHubClient(logger RequestLogger) *DockerHubClient {
 	parsed, _ := url.Parse(dockerHubBaseURL)
 	return &DockerHubClient{
@@ -31,16 +63,41 @@ func NewDockerHubClient(logger RequestLogger) *DockerHubClient {
 }
 
 func (c *DockerHubClient) SearchTags(ctx context.Context, input string) ([]Tag, string, error) {
-	namespace, repo, err := c.resolveRepository(ctx, input)
+	firstPage, err := c.SearchTagsPage(ctx, input)
 	if err != nil {
 		return nil, "", err
 	}
 
-	tags, err := c.listTags(ctx, namespace, repo)
-	if err != nil {
-		return nil, "", err
+	tags := append([]Tag{}, firstPage.Tags...)
+	next := firstPage.Next
+	for next != "" {
+		page, pageErr := c.NextTagsPage(ctx, firstPage.Image, next)
+		if pageErr != nil {
+			return nil, "", pageErr
+		}
+		tags = append(tags, page.Tags...)
+		next = page.Next
 	}
-	return tags, fmt.Sprintf("%s/%s", namespace, repo), nil
+	return tags, firstPage.Image, nil
+}
+
+func (c *DockerHubClient) SearchTagsPage(ctx context.Context, input string) (DockerHubTagsPage, error) {
+	namespace, repo, err := c.resolveRepository(ctx, input)
+	if err != nil {
+		return DockerHubTagsPage{}, err
+	}
+
+	return c.listTagsPage(ctx, fmt.Sprintf("%s/%s", namespace, repo), "")
+}
+
+func (c *DockerHubClient) NextTagsPage(ctx context.Context, image, next string) (DockerHubTagsPage, error) {
+	if strings.TrimSpace(image) == "" {
+		return DockerHubTagsPage{}, errors.New("docker hub image is required")
+	}
+	if strings.TrimSpace(next) == "" {
+		return DockerHubTagsPage{}, errors.New("docker hub next page URL is required")
+	}
+	return c.listTagsPage(ctx, image, next)
 }
 
 func (c *DockerHubClient) resolveRepository(ctx context.Context, input string) (string, string, error) {
@@ -94,41 +151,56 @@ func (c *DockerHubClient) searchRepositories(ctx context.Context, query string) 
 	endpoint := c.resolve("/v2/search/repositories/", queryValues)
 
 	var payload dockerHubSearchResponse
-	if err := c.doJSON(ctx, http.MethodGet, endpoint, nil, &payload); err != nil {
+	if _, err := c.doJSON(ctx, http.MethodGet, endpoint, nil, &payload); err != nil {
 		return nil, err
 	}
 	return payload.Results, nil
 }
 
-func (c *DockerHubClient) listTags(ctx context.Context, namespace, repo string) ([]Tag, error) {
-	query := url.Values{}
-	query.Set("page_size", "100")
-	endpoint := c.resolve(fmt.Sprintf("/v2/namespaces/%s/repositories/%s/tags", namespace, repo), query)
-
-	var tags []Tag
-	for endpoint != "" {
-		var payload dockerHubTagsResponse
-		if err := c.doJSON(ctx, http.MethodGet, endpoint, nil, &payload); err != nil {
-			return nil, err
-		}
-		for _, entry := range payload.Results {
-			tags = append(tags, Tag{
-				Name:         entry.Name,
-				Digest:       entry.Digest,
-				SizeBytes:    entry.FullSize,
-				UpdatedAt:    parseDockerHubTime(entry.LastUpdated),
-				PushedAt:     parseDockerHubTime(firstNonEmptyString(entry.TagLastPushed, entry.LastUpdated)),
-				LastPulledAt: parseDockerHubTime(entry.TagLastPulled),
-			})
-		}
-
-		endpoint = ""
-		if payload.Next != "" {
-			endpoint = c.resolveNext(payload.Next)
-		}
+func (c *DockerHubClient) listTagsPage(ctx context.Context, image, next string) (DockerHubTagsPage, error) {
+	namespace, repo := splitRepo(image)
+	if namespace == "" || repo == "" {
+		return DockerHubTagsPage{}, fmt.Errorf("invalid Docker Hub repository %q", image)
 	}
 
-	return tags, nil
+	endpoint := strings.TrimSpace(next)
+	if endpoint == "" {
+		query := url.Values{}
+		query.Set("page_size", "100")
+		endpoint = c.resolve(fmt.Sprintf("/v2/namespaces/%s/repositories/%s/tags", namespace, repo), query)
+	} else {
+		endpoint = c.resolveNext(endpoint)
+	}
+
+	var payload dockerHubTagsResponse
+	limit, err := c.doJSON(ctx, http.MethodGet, endpoint, nil, &payload)
+	if err != nil {
+		return DockerHubTagsPage{}, err
+	}
+
+	tags := make([]Tag, 0, len(payload.Results))
+	for _, entry := range payload.Results {
+		tags = append(tags, Tag{
+			Name:         entry.Name,
+			Digest:       entry.Digest,
+			SizeBytes:    entry.FullSize,
+			UpdatedAt:    parseDockerHubTime(entry.LastUpdated),
+			PushedAt:     parseDockerHubTime(firstNonEmptyString(entry.TagLastPushed, entry.LastUpdated)),
+			LastPulledAt: parseDockerHubTime(entry.TagLastPulled),
+		})
+	}
+
+	nextPage := ""
+	if payload.Next != "" {
+		nextPage = c.resolveNext(payload.Next)
+	}
+
+	return DockerHubTagsPage{
+		Image:     fmt.Sprintf("%s/%s", namespace, repo),
+		Tags:      tags,
+		Next:      nextPage,
+		RateLimit: limit,
+	}, nil
 }
 
 func (c *DockerHubClient) resolveNext(next string) string {
@@ -154,25 +226,32 @@ func (c *DockerHubClient) resolve(p string, query url.Values) string {
 	return resolved.String()
 }
 
-func (c *DockerHubClient) doJSON(ctx context.Context, method, endpoint string, body io.Reader, out interface{}) error {
+func (c *DockerHubClient) doJSON(ctx context.Context, method, endpoint string, body io.Reader, out interface{}) (DockerHubRateLimit, error) {
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
 	if err != nil {
-		return err
+		return DockerHubRateLimit{}, err
 	}
 	resp, err := c.httpClient.Do(req)
 	c.logRequest(req, resp)
 	if err != nil {
-		return err
+		return DockerHubRateLimit{}, err
 	}
 	defer resp.Body.Close()
 
+	rateLimit := parseDockerHubRateLimit(resp.Header)
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return rateLimit, &DockerHubRateLimitError{
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")),
+			RateLimit:  rateLimit,
+		}
+	}
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("docker hub request failed: %s", resp.Status)
+		return rateLimit, fmt.Errorf("docker hub request failed: %s", resp.Status)
 	}
 	if out == nil {
-		return nil
+		return rateLimit, nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return rateLimit, json.NewDecoder(resp.Body).Decode(out)
 }
 
 func (c *DockerHubClient) logRequest(req *http.Request, resp *http.Response) {
@@ -275,4 +354,41 @@ func firstNonEmptyString(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func parseDockerHubRateLimit(headers http.Header) DockerHubRateLimit {
+	limit := parseHeaderInt(headers.Get("X-RateLimit-Limit"))
+	remaining := parseHeaderInt(headers.Get("X-RateLimit-Remaining"))
+	resetUnix := parseHeaderInt(headers.Get("X-RateLimit-Reset"))
+
+	resetAt := time.Time{}
+	if resetUnix > 0 {
+		resetAt = time.Unix(int64(resetUnix), 0).UTC()
+	}
+
+	return DockerHubRateLimit{
+		Limit:     limit,
+		Remaining: remaining,
+		ResetAt:   resetAt,
+	}
+}
+
+func parseHeaderInt(value string) int {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return -1
+	}
+	parsed, err := strconv.Atoi(trimmed)
+	if err != nil {
+		return -1
+	}
+	return parsed
+}
+
+func parseRetryAfter(value string) time.Duration {
+	seconds := parseHeaderInt(value)
+	if seconds <= 0 {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
 }
