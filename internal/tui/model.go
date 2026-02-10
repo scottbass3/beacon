@@ -35,12 +35,17 @@ const (
 )
 
 const (
-	defaultTableHeight = 10
-	minTableHeight     = 1
-	maxLogLines        = 25
-	maxVisibleLogs     = 5
-	maxFilterWidth     = 40
-	tableChromeLines   = 2
+	defaultTableHeight       = 10
+	minTableHeight           = 1
+	maxLogLines              = 25
+	maxVisibleLogs           = 5
+	maxFilterWidth           = 40
+	tableChromeLines         = 2
+	mainSectionTitleLines    = 1
+	mainSectionBorderLines   = 2
+	mainSectionHChromeChars  = 4
+	defaultRenderWidth       = 80
+	defaultTableSelectedFill = 74
 )
 
 type Model struct {
@@ -199,7 +204,9 @@ var (
 	metaValueStyle         = lipgloss.NewStyle().Foreground(colorTitleText).MarginRight(2)
 	modeInputStyle         = lipgloss.NewStyle().Foreground(colorAccent).Background(colorSurface2).Padding(0, 1)
 	emptyStyle             = lipgloss.NewStyle().Foreground(colorMuted).Italic(true)
-	sectionTitleStyle      = lipgloss.NewStyle().Foreground(colorTitleText).Background(colorBorder).Bold(true).Padding(0, 1)
+	mainSectionStyle       = lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(colorBorder).Background(colorSurface).Padding(0, 1)
+	mainSectionTitleStyle  = lipgloss.NewStyle().Foreground(colorSurface2).Background(colorAccent).Bold(true).Padding(0, 2)
+	mainSectionTitleLine   = lipgloss.NewStyle()
 	topSectionStyle        = lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(colorBorder).Background(colorSurface).Padding(0, 1)
 	logTitleStyle          = lipgloss.NewStyle().Foreground(colorTitleText).Background(colorPrimary).Bold(true).Padding(0, 1)
 	logBoxStyle            = lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(colorBorder).Background(colorSurface).Padding(0, 1)
@@ -245,7 +252,7 @@ func NewModel(registryHost string, auth registry.Auth, logger registry.RequestLo
 	filter.Blur()
 
 	tbl := table.New()
-	tbl.SetStyles(tableStyles())
+	tbl.SetStyles(tableStyles(defaultTableSelectedFill))
 	tbl.SetHeight(defaultTableHeight)
 	tbl.Focus()
 
@@ -599,9 +606,27 @@ func (m Model) renderTopSection() string {
 	if inputLine := m.renderModeInputLine(); inputLine != "" {
 		lines = append(lines, modeInputStyle.Render(inputLine))
 	}
-	width := m.width
+	return topSectionStyle.Width(sectionPanelWidth(m.width)).Render(strings.Join(lines, "\n"))
+}
+
+func (m Model) renderMainSection() string {
+	panelWidth := sectionPanelWidth(m.width)
+	contentWidth := m.mainSectionContentWidth()
+	title := mainSectionTitleStyle.Render(strings.ToUpper(focusLabel(m.focus)))
+	titleLine := mainSectionTitleLine.
+		Width(contentWidth).
+		Align(lipgloss.Center).
+		Render(title)
+	content := strings.Join([]string{
+		titleLine,
+		m.renderBody(),
+	}, "\n")
+	return mainSectionStyle.Width(panelWidth).Render(content)
+}
+
+func sectionPanelWidth(width int) int {
 	if width <= 0 {
-		width = 80
+		width = defaultRenderWidth
 	}
 	panelWidth := width - 2
 	if panelWidth < 24 {
@@ -610,26 +635,15 @@ func (m Model) renderTopSection() string {
 	if panelWidth < 1 {
 		panelWidth = 1
 	}
-	return topSectionStyle.Width(panelWidth).Render(strings.Join(lines, "\n"))
+	return panelWidth
 }
 
-func (m Model) renderMainSection() string {
-	width := m.width
-	if width <= 0 {
-		width = 80
+func (m Model) mainSectionContentWidth() int {
+	contentWidth := sectionPanelWidth(m.width) - mainSectionHChromeChars
+	if contentWidth < 1 {
+		return 1
 	}
-	titleWidth := width - 2
-	if titleWidth < 10 {
-		titleWidth = width
-	}
-	if titleWidth < 1 {
-		titleWidth = 1
-	}
-	pageTitle := sectionTitleStyle.
-		Width(titleWidth).
-		Align(lipgloss.Center).
-		Render(strings.ToUpper(focusLabel(m.focus)))
-	return pageTitle + "\n" + m.renderBody()
+	return contentWidth
 }
 
 func (m Model) renderModeInputLine() string {
@@ -884,17 +898,7 @@ func (m Model) renderBody() string {
 }
 
 func (m Model) renderLogs() string {
-	width := m.width
-	if width <= 0 {
-		width = 80
-	}
-	panelWidth := width - 2
-	if panelWidth < 24 {
-		panelWidth = width
-	}
-	if panelWidth < 1 {
-		panelWidth = 1
-	}
+	panelWidth := sectionPanelWidth(m.width)
 	contentWidth := maxInt(10, panelWidth-6)
 
 	lines := []string{logTitleStyle.Render("Requests")}
@@ -1957,14 +1961,15 @@ func (m *Model) syncTable() {
 	list := m.listView()
 	width := m.width
 	if width <= 0 {
-		width = 80
+		width = defaultRenderWidth
 	}
 	filterWidth := clampInt(width-10, 10, maxFilterWidth)
 	m.filterInput.Width = filterWidth
 	m.dockerHubInput.Width = filterWidth
 	m.commandInput.Width = filterWidth
 
-	columns := makeColumns(m.focus, width, m.effectiveTableSpec())
+	tableWidth := maxInt(10, m.mainSectionContentWidth())
+	columns := makeColumns(m.focus, tableWidth, m.effectiveTableSpec())
 	rows := normalizeTableRows(toTableRows(list.rows), len(columns))
 	columnsChanged := !equalTableColumns(m.tableColumns, columns)
 	if columnsChanged {
@@ -1985,10 +1990,10 @@ func (m *Model) syncTable() {
 	if m.table.Height() != tableHeight {
 		m.table.SetHeight(tableHeight)
 	}
-	tableWidth := maxInt(10, width-2)
 	if m.table.Width() != tableWidth {
 		m.table.SetWidth(tableWidth)
 	}
+	m.table.SetStyles(tableStyles(tableWidth))
 	cursor := m.table.Cursor()
 	if len(list.rows) == 0 {
 		m.table.SetCursor(0)
@@ -2002,7 +2007,6 @@ func (m Model) tableHeight() int {
 		return defaultTableHeight
 	}
 	topLines := lineCount(m.renderTopSection())
-	pageTitleLines := 1
 	sectionSeparators := 1 // top section + main section
 	debugLines := 0
 	if m.debug {
@@ -2011,8 +2015,8 @@ func (m Model) tableHeight() int {
 		sectionSeparators++ // main section + debug section
 	}
 	// bubbles/table height controls only row viewport height; header + header border
-	// are rendered on top of that and consume extra terminal lines.
-	available := m.height - topLines - pageTitleLines - debugLines - tableChromeLines - sectionSeparators
+	// plus the bordered main section and title consume extra terminal lines.
+	available := m.height - topLines - mainSectionTitleLines - mainSectionBorderLines - debugLines - tableChromeLines - sectionSeparators
 	if available < minTableHeight {
 		return minTableHeight
 	}
@@ -2161,7 +2165,7 @@ func (m Model) listView() listView {
 }
 
 func imageHeaders(spec registry.ImageTableSpec) []string {
-	headers := []string{"Image"}
+	headers := []string{"Name"}
 	if spec.ShowTagCount {
 		headers = append(headers, "Tags")
 	}
@@ -2175,11 +2179,11 @@ func imageHeaders(spec registry.ImageTableSpec) []string {
 }
 
 func projectHeaders() []string {
-	return []string{"Project", "Images"}
+	return []string{"Name", "Images"}
 }
 
 func tagHeaders(spec registry.TagTableSpec) []string {
-	headers := []string{"Tag"}
+	headers := []string{"Name"}
 	if spec.ShowSize {
 		headers = append(headers, "Size")
 	}
@@ -2368,7 +2372,7 @@ func makeColumns(focus Focus, width int, spec registry.TableSpec) []table.Column
 		content := maxInt(20, available-spacingTotal)
 		nameWidth := maxInt(12, content-countWidth)
 		return []table.Column{
-			{Title: "Project", Width: nameWidth},
+			{Title: "Name", Width: nameWidth},
 			{Title: "Images", Width: countWidth},
 		}
 	case FocusImages:
@@ -2390,7 +2394,7 @@ func makeColumns(focus Focus, width int, spec registry.TableSpec) []table.Column
 		spacingTotal := spacing * (columnCount - 1)
 		content := maxInt(20, available-spacingTotal)
 		nameWidth := maxInt(12, content-fixed)
-		return append([]table.Column{{Title: "Image", Width: nameWidth}}, columns...)
+		return append([]table.Column{{Title: "Name", Width: nameWidth}}, columns...)
 	case FocusHistory:
 		columnCount := 2
 		fixed := timeWidth
@@ -2437,11 +2441,11 @@ func makeColumns(focus Focus, width int, spec registry.TableSpec) []table.Column
 		spacingTotal := spacing * (columnCount - 1)
 		content := maxInt(20, available-spacingTotal)
 		nameWidth := maxInt(12, content-fixed)
-		return append([]table.Column{{Title: "Tag", Width: nameWidth}}, columns...)
+		return append([]table.Column{{Title: "Name", Width: nameWidth}}, columns...)
 	}
 }
 
-func tableStyles() table.Styles {
+func tableStyles(selectedWidth int) table.Styles {
 	styles := table.DefaultStyles()
 	styles.Header = styles.Header.
 		BorderStyle(lipgloss.NormalBorder()).
@@ -2456,6 +2460,9 @@ func tableStyles() table.Styles {
 		Foreground(colorSelected).
 		Background(colorAccent).
 		Bold(true)
+	if selectedWidth > 0 {
+		styles.Selected = styles.Selected.Width(selectedWidth).MaxWidth(selectedWidth)
+	}
 	return styles
 }
 
