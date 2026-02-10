@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	lipglossv2 "github.com/charmbracelet/lipgloss/v2"
 
 	"github.com/scottbass3/beacon/internal/registry"
 )
@@ -24,6 +25,13 @@ const (
 	FocusTags
 	FocusHistory
 	FocusDockerHubTags
+)
+
+type confirmAction int
+
+const (
+	confirmActionNone confirmAction = iota
+	confirmActionQuit
 )
 
 const (
@@ -42,6 +50,11 @@ type Model struct {
 	status  string
 	focus   Focus
 	context string
+
+	confirmAction  confirmAction
+	confirmTitle   string
+	confirmMessage string
+	confirmFocus   int
 
 	registryHost   string
 	registryClient registry.Client
@@ -159,15 +172,24 @@ var (
 )
 
 var (
-	titleStyle     = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
-	labelStyle     = lipgloss.NewStyle().Foreground(colorMuted)
-	helpStyle      = lipgloss.NewStyle().Foreground(colorMuted)
-	filterStyle    = lipgloss.NewStyle().Foreground(colorAccent)
-	emptyStyle     = lipgloss.NewStyle().Foreground(colorMuted).Italic(true)
-	logTitleStyle  = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
-	logBoxStyle    = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1)
-	authTitleStyle = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
-	authErrorStyle = lipgloss.NewStyle().Foreground(colorAccent)
+	titleStyle             = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+	labelStyle             = lipgloss.NewStyle().Foreground(colorMuted)
+	helpStyle              = lipgloss.NewStyle().Foreground(colorMuted)
+	filterStyle            = lipgloss.NewStyle().Foreground(colorAccent)
+	emptyStyle             = lipgloss.NewStyle().Foreground(colorMuted).Italic(true)
+	logTitleStyle          = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+	logBoxStyle            = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1)
+	modalBackdropStyle     = lipglossv2.NewStyle().Faint(true)
+	modalPanelStyle        = lipglossv2.NewStyle().BorderStyle(lipglossv2.RoundedBorder()).BorderForeground(lipglossv2.Color("62")).Padding(1, 2)
+	modalTitleStyle        = lipglossv2.NewStyle().Foreground(lipglossv2.Color("62")).Bold(true)
+	modalLabelStyle        = lipglossv2.NewStyle().Foreground(lipglossv2.Color("241"))
+	modalErrorStyle        = lipglossv2.NewStyle().Foreground(lipglossv2.Color("204"))
+	modalFocusStyle        = lipglossv2.NewStyle().Foreground(lipglossv2.Color("204")).Bold(true)
+	modalButtonStyle       = lipglossv2.NewStyle().Foreground(lipglossv2.Color("241"))
+	modalButtonFocusStyle  = lipglossv2.NewStyle().Foreground(lipglossv2.Color("229")).Bold(true)
+	modalHelpStyle         = lipglossv2.NewStyle().Foreground(lipglossv2.Color("241"))
+	modalDividerStyle      = lipglossv2.NewStyle().Foreground(lipglossv2.Color("238"))
+	modalDimmedActionStyle = lipglossv2.NewStyle().Foreground(lipglossv2.Color("240"))
 )
 
 type ContextOption struct {
@@ -292,14 +314,17 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.isConfirmModalActive() {
+			return m.handleConfirmKey(msg)
+		}
+		if m.isAuthModalActive() {
+			return m.handleAuthKey(msg)
+		}
 		if !m.commandActive && (msg.String() == ":" || (len(msg.Runes) == 1 && msg.Runes[0] == ':')) {
 			return m.enterCommandMode()
 		}
 		if m.commandActive {
 			return m.handleCommandKey(msg)
-		}
-		if m.authRequired && m.registryClient == nil {
-			return m.handleAuthKey(msg)
 		}
 		if m.dockerHubActive {
 			return m.handleDockerHubKey(msg)
@@ -464,10 +489,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
-	if m.authRequired && m.registryClient == nil {
-		return m.renderAuth()
+	view := m.renderApp()
+	if m.isAuthModalActive() {
+		view = m.renderModal(view, m.renderAuthModal())
 	}
+	if m.isConfirmModalActive() {
+		view = m.renderModal(view, m.renderConfirmModal())
+	}
+	return view
+}
 
+func (m Model) renderApp() string {
 	sections := []string{
 		m.renderTopSection(),
 		m.renderMainSection(),
@@ -535,14 +567,14 @@ func (m Model) renderModeInputLine() string {
 	return ""
 }
 
-func (m Model) renderAuth() string {
+func (m Model) renderAuthModal() string {
 	lines := []string{
-		authTitleStyle.Render("Beacon"),
-		labelStyle.Render(fmt.Sprintf("Registry: %s", m.registryHost)),
-		labelStyle.Render("Authentication required"),
+		modalTitleStyle.Render("Login"),
+		modalLabelStyle.Render(fmt.Sprintf("Registry: %s", m.registryHost)),
+		modalDividerStyle.Render(strings.Repeat("─", 18)),
 	}
 	if m.authError != "" {
-		lines = append(lines, authErrorStyle.Render(m.authError))
+		lines = append(lines, modalErrorStyle.Render(m.authError))
 	}
 
 	username := m.usernameInput.View()
@@ -556,32 +588,129 @@ func (m Model) renderAuth() string {
 	}
 
 	if m.authFocus == 0 {
-		username = filterStyle.Render(username)
+		username = modalFocusStyle.Render(username)
 	}
 	if m.authFocus == 1 {
-		password = filterStyle.Render(password)
+		password = modalFocusStyle.Render(password)
 	}
 	if m.authFocus == 2 && m.authUI().ShowRemember {
-		remember = filterStyle.Render(remember)
+		remember = modalFocusStyle.Render(remember)
 	}
 
-	help := "Keys: tab/shift+tab move  enter submit  q quit"
+	help := "tab/shift+tab move  enter submit  q quit"
 	if m.authUI().ShowRemember {
-		help = "Keys: tab/shift+tab move  space toggle  enter submit  q quit"
+		help = "tab/shift+tab move  space toggle  enter submit  q quit"
 	}
 
 	lines = append(lines,
 		"",
-		labelStyle.Render("Username:"),
+		modalLabelStyle.Render("Username"),
 		username,
-		labelStyle.Render("Password:"),
+		modalLabelStyle.Render("Password"),
 		password,
-		remember,
+	)
+	if m.authUI().ShowRemember {
+		lines = append(lines, remember)
+	}
+	lines = append(lines,
 		"",
-		helpStyle.Render(help),
+		modalHelpStyle.Render(help),
 	)
 
-	return strings.Join(lines, "\n")
+	return m.renderModalCard(strings.Join(lines, "\n"), 72)
+}
+
+func (m Model) renderConfirmModal() string {
+	title := strings.TrimSpace(m.confirmTitle)
+	if title == "" {
+		title = "Confirm action"
+	}
+	confirmLabel := "[ Confirm ]"
+	switch m.confirmAction {
+	case confirmActionQuit:
+		confirmLabel = "[ Quit ]"
+	}
+
+	cancel := "[ Cancel ]"
+	if m.confirmFocus == 0 {
+		cancel = modalButtonFocusStyle.Render(cancel)
+	} else {
+		cancel = modalButtonStyle.Render(cancel)
+	}
+	if m.confirmFocus == 1 {
+		confirmLabel = modalButtonFocusStyle.Render(confirmLabel)
+	} else {
+		confirmLabel = modalDimmedActionStyle.Render(confirmLabel)
+	}
+
+	lines := []string{
+		modalTitleStyle.Render(title),
+	}
+	if message := strings.TrimSpace(m.confirmMessage); message != "" {
+		lines = append(lines, modalLabelStyle.Render(message))
+	}
+	lines = append(lines,
+		"",
+		cancel+"  "+confirmLabel,
+		"",
+		modalHelpStyle.Render("tab/left/right move  enter choose  y/n quick select"),
+	)
+	return m.renderModalCard(strings.Join(lines, "\n"), 64)
+}
+
+func (m Model) renderModal(base, modal string) string {
+	width, height := m.modalViewport(base)
+	background := lipglossv2.Place(width, height, lipglossv2.Left, lipglossv2.Top, modalBackdropStyle.Render(base))
+	canvas := lipglossv2.NewCanvas(lipglossv2.NewLayer(background))
+	canvas.AddLayers(
+		lipglossv2.NewLayer(modal).
+			X(maxInt(0, (width-lipglossv2.Width(modal))/2)).
+			Y(maxInt(0, (height-lipglossv2.Height(modal))/2)).
+			Z(1),
+	)
+	return canvas.Render()
+}
+
+func (m Model) renderModalCard(content string, maxWidth int) string {
+	return modalPanelStyle.Width(m.modalWidth(maxWidth)).Render(content)
+}
+
+func (m Model) modalWidth(maxWidth int) int {
+	width, _ := m.modalViewport("")
+	if width <= 2 {
+		return width
+	}
+	modalWidth := width - 8
+	if modalWidth < 24 {
+		modalWidth = width - 2
+	}
+	if maxWidth > 0 && modalWidth > maxWidth {
+		modalWidth = maxWidth
+	}
+	if modalWidth < 12 {
+		modalWidth = 12
+	}
+	return modalWidth
+}
+
+func (m Model) modalViewport(base string) (int, int) {
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+	height := m.height
+	if height <= 0 {
+		height = maxInt(24, lineCount(base))
+	}
+	return width, height
+}
+
+func (m Model) isAuthModalActive() bool {
+	return m.authRequired && m.registryClient == nil
+}
+
+func (m Model) isConfirmModalActive() bool {
+	return m.confirmAction != confirmActionNone
 }
 
 func (m Model) renderBody() string {
@@ -668,7 +797,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "ctrl+c", "q":
-		return m, tea.Quit
+		return m.openQuitConfirm()
 	case "esc":
 		return m, m.handleEscape()
 	case "/":
@@ -724,7 +853,7 @@ func (m Model) handleDockerHubKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "ctrl+c", "q":
-		return m, tea.Quit
+		return m.openQuitConfirm()
 	case "esc":
 		return m.exitDockerHubMode()
 	case ":":
@@ -812,7 +941,7 @@ func (m *Model) handleTableNavKey(msg tea.KeyMsg) bool {
 func (m Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
-		return m, tea.Quit
+		return m.openQuitConfirm()
 	case "esc":
 		return m.exitCommandMode()
 	case "tab":
@@ -1060,7 +1189,7 @@ func contextNames(contexts []ContextOption) []string {
 func (m Model) handleAuthKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
-		return m, tea.Quit
+		return m.openQuitConfirm()
 	case "tab", "down":
 		m.authFocus = (m.authFocus + 1) % m.authFieldCount()
 		m.syncAuthFocus()
@@ -1086,6 +1215,58 @@ func (m Model) handleAuthKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.passwordInput, cmd = m.passwordInput.Update(msg)
 	}
 	return m, cmd
+}
+
+func (m Model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "left", "h", "shift+tab":
+		m.confirmFocus = 0
+	case "right", "l", "tab":
+		m.confirmFocus = 1
+	case "esc", "n":
+		m.clearConfirm()
+		return m, nil
+	case "y":
+		return m.resolveConfirm(true)
+	case "enter":
+		return m.resolveConfirm(m.confirmFocus == 1)
+	case "ctrl+c", "q":
+		return m.resolveConfirm(true)
+	}
+	return m, nil
+}
+
+func (m Model) openQuitConfirm() (tea.Model, tea.Cmd) {
+	m.confirmAction = confirmActionQuit
+	m.confirmTitle = "Quit Beacon?"
+	if m.isLoading() {
+		m.confirmMessage = "A request is still in progress."
+	} else {
+		m.confirmMessage = "Close the current session?"
+	}
+	m.confirmFocus = 0
+	return m, nil
+}
+
+func (m Model) resolveConfirm(accept bool) (tea.Model, tea.Cmd) {
+	action := m.confirmAction
+	m.clearConfirm()
+	if !accept {
+		return m, nil
+	}
+	switch action {
+	case confirmActionQuit:
+		return m, tea.Quit
+	default:
+		return m, nil
+	}
+}
+
+func (m *Model) clearConfirm() {
+	m.confirmAction = confirmActionNone
+	m.confirmTitle = ""
+	m.confirmMessage = ""
+	m.confirmFocus = 0
 }
 
 func (m Model) submitAuth() (tea.Model, tea.Cmd) {
