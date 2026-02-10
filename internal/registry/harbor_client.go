@@ -135,10 +135,6 @@ func (c *HarborClient) ListTags(ctx context.Context, image string) ([]Tag, error
 		}
 	}
 
-	sort.Slice(tags, func(i, j int) bool {
-		return tags[i].Name < tags[j].Name
-	})
-
 	return tags, nil
 }
 
