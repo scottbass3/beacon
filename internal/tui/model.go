@@ -28,10 +28,11 @@ const (
 
 const (
 	defaultTableHeight = 10
-	minTableHeight     = 4
+	minTableHeight     = 1
 	maxLogLines        = 25
 	maxVisibleLogs     = 5
 	maxFilterWidth     = 40
+	tableChromeLines   = 2
 )
 
 type Model struct {
@@ -776,33 +777,32 @@ func (m *Model) handleTableNavKey(msg tea.KeyMsg) bool {
 	if rowCount == 0 {
 		return false
 	}
-	cursor := m.table.Cursor()
 	step := maxInt(1, m.table.Height())
 
 	switch msg.String() {
 	case "up", "k":
-		m.table.SetCursor(cursor - 1)
+		m.table.MoveUp(1)
 		return true
 	case "down", "j":
-		m.table.SetCursor(cursor + 1)
+		m.table.MoveDown(1)
 		return true
 	case "pgup", "b":
-		m.table.SetCursor(cursor - step)
+		m.table.MoveUp(step)
 		return true
 	case "pgdown", "f", " ":
-		m.table.SetCursor(cursor + step)
+		m.table.MoveDown(step)
 		return true
 	case "ctrl+u", "u":
-		m.table.SetCursor(cursor - maxInt(1, step/2))
+		m.table.MoveUp(maxInt(1, step/2))
 		return true
 	case "ctrl+d", "d":
-		m.table.SetCursor(cursor + maxInt(1, step/2))
+		m.table.MoveDown(maxInt(1, step/2))
 		return true
 	case "home", "g":
-		m.table.SetCursor(0)
+		m.table.GotoTop()
 		return true
 	case "end", "G":
-		m.table.SetCursor(rowCount - 1)
+		m.table.GotoBottom()
 		return true
 	default:
 		return false
@@ -1591,12 +1591,16 @@ func (m Model) tableHeight() int {
 	}
 	topLines := lineCount(m.renderTopSection())
 	pageTitleLines := 1
+	sectionSeparators := 1 // top section + main section
 	debugLines := 0
 	if m.debug {
 		// Requests section: top/bottom border + title + fixed visible rows.
 		debugLines = maxVisibleLogs + 3
+		sectionSeparators++ // main section + debug section
 	}
-	available := m.height - topLines - pageTitleLines - debugLines
+	// bubbles/table height controls only row viewport height; header + header border
+	// are rendered on top of that and consume extra terminal lines.
+	available := m.height - topLines - pageTitleLines - debugLines - tableChromeLines - sectionSeparators
 	if available < minTableHeight {
 		return minTableHeight
 	}
