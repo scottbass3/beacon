@@ -93,6 +93,8 @@ type Model struct {
 	logCh  <-chan string
 	logs   []string
 	logMax int
+
+	loadingCount int
 }
 
 type imagesMsg struct {
@@ -298,6 +300,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.syncTable()
 	case imagesMsg:
+		m.stopLoading()
 		if msg.err != nil {
 			m.status = fmt.Sprintf("Error loading images: %v", msg.err)
 			m.syncTable()
@@ -322,6 +325,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clearFilter()
 		m.syncTable()
 	case projectsMsg:
+		m.stopLoading()
 		if msg.err != nil {
 			m.status = fmt.Sprintf("Error loading projects: %v", msg.err)
 			m.syncTable()
@@ -342,6 +346,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clearFilter()
 		m.syncTable()
 	case projectImagesMsg:
+		m.stopLoading()
 		if msg.err != nil {
 			m.status = fmt.Sprintf("Error loading images for %s: %v", msg.project, msg.err)
 			m.syncTable()
@@ -362,6 +367,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clearFilter()
 		m.syncTable()
 	case tagsMsg:
+		m.stopLoading()
 		if msg.err != nil {
 			m.status = fmt.Sprintf("Error loading tags: %v", msg.err)
 			m.syncTable()
@@ -385,6 +391,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clearFilter()
 		m.syncTable()
 	case historyMsg:
+		m.stopLoading()
 		if msg.err != nil {
 			m.status = fmt.Sprintf("Error loading history: %v", msg.err)
 			m.syncTable()
@@ -396,6 +403,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clearFilter()
 		m.syncTable()
 	case dockerHubTagsMsg:
+		m.stopLoading()
 		if msg.err != nil {
 			m.status = fmt.Sprintf("Error searching Docker Hub: %v", msg.err)
 			m.syncTable()
@@ -446,9 +454,13 @@ func (m Model) renderTopSection() string {
 	if contextName == "" {
 		contextName = "-"
 	}
+	statusLine := labelStyle.Render(fmt.Sprintf("Status: %s", m.status))
+	if m.isLoading() {
+		statusLine = filterStyle.Render(fmt.Sprintf("Status: [loading] %s", m.status))
+	}
 	lines := []string{
 		titleStyle.Render("Beacon"),
-		labelStyle.Render(fmt.Sprintf("Status: %s", m.status)),
+		statusLine,
 		labelStyle.Render(fmt.Sprintf("Context: %s", contextName)),
 		labelStyle.Render(fmt.Sprintf("Path: %s", m.currentPath())),
 	}
@@ -546,7 +558,7 @@ func (m Model) renderAuth() string {
 func (m Model) renderBody() string {
 	view := m.table.View()
 	if len(m.table.Rows()) == 0 {
-		return view + "\n" + emptyStyle.Render("(empty)")
+		return view + "\n" + emptyStyle.Render(m.emptyBodyMessage())
 	}
 	return view
 }
@@ -694,6 +706,7 @@ func (m Model) handleDockerHubKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.status = fmt.Sprintf("Searching Docker Hub for %s...", query)
+		m.startLoading()
 		return m, loadDockerHubTagsCmd(query, m.logger)
 	case "s":
 		m.dockerHubInput.SetValue("")
@@ -1104,6 +1117,7 @@ func (m *Model) refreshCurrent() tea.Cmd {
 		}
 		if projectClient, ok := m.registryClient.(registry.ProjectClient); ok {
 			m.status = fmt.Sprintf("Refreshing projects from %s...", m.registryHost)
+			m.startLoading()
 			return loadProjectsCmd(projectClient)
 		}
 		m.status = "Project listing is not available for this registry client"
@@ -1116,12 +1130,14 @@ func (m *Model) refreshCurrent() tea.Cmd {
 		if m.hasSelectedProject {
 			if projectClient, ok := m.registryClient.(registry.ProjectClient); ok {
 				m.status = fmt.Sprintf("Refreshing images for %s...", m.selectedProject)
+				m.startLoading()
 				return loadProjectImagesCmd(projectClient, m.selectedProject)
 			}
 			m.status = "Project images are not available for this registry client"
 			return nil
 		}
 		m.status = fmt.Sprintf("Refreshing images from %s...", m.registryHost)
+		m.startLoading()
 		return loadImagesCmd(m.registryClient)
 	case FocusTags:
 		if !m.hasSelectedImage {
@@ -1132,15 +1148,18 @@ func (m *Model) refreshCurrent() tea.Cmd {
 			if m.hasSelectedProject {
 				if projectClient, ok := m.registryClient.(registry.ProjectClient); ok {
 					m.status = fmt.Sprintf("Refreshing images for %s...", m.selectedProject)
+					m.startLoading()
 					return loadProjectImagesCmd(projectClient, m.selectedProject)
 				}
 				m.status = "Project images are not available for this registry client"
 				return nil
 			}
 			m.status = fmt.Sprintf("Refreshing images from %s...", m.registryHost)
+			m.startLoading()
 			return loadImagesCmd(m.registryClient)
 		}
 		m.status = fmt.Sprintf("Refreshing tags for %s...", m.selectedImage.Name)
+		m.startLoading()
 		return loadTagsCmd(m.registryClient, m.selectedImage.Name)
 	case FocusHistory:
 		if !m.hasSelectedTag {
@@ -1149,9 +1168,11 @@ func (m *Model) refreshCurrent() tea.Cmd {
 				return nil
 			}
 			m.status = fmt.Sprintf("Refreshing tags for %s...", m.selectedImage.Name)
+			m.startLoading()
 			return loadTagsCmd(m.registryClient, m.selectedImage.Name)
 		}
 		m.status = fmt.Sprintf("Refreshing history for %s:%s...", m.selectedImage.Name, m.selectedTag.Name)
+		m.startLoading()
 		return loadHistoryCmd(m.registryClient, m.selectedImage.Name, m.selectedTag.Name)
 	default:
 		return m.initialLoadCmd()
@@ -1165,6 +1186,7 @@ func (m *Model) refreshDockerHub() tea.Cmd {
 		return nil
 	}
 	m.status = fmt.Sprintf("Searching Docker Hub for %s...", query)
+	m.startLoading()
 	return loadDockerHubTagsCmd(query, m.logger)
 }
 
@@ -1193,6 +1215,7 @@ func (m *Model) handleEnter() tea.Cmd {
 			m.status = fmt.Sprintf("Loading images for %s...", selected.Name)
 			m.clearFilter()
 			m.syncTable()
+			m.startLoading()
 			return loadProjectImagesCmd(projectClient, selected.Name)
 		}
 		m.status = "Project images are not available for this registry client"
@@ -1213,6 +1236,7 @@ func (m *Model) handleEnter() tea.Cmd {
 		m.status = fmt.Sprintf("Loading tags for %s...", selected.Name)
 		m.clearFilter()
 		m.syncTable()
+		m.startLoading()
 		return loadTagsCmd(m.registryClient, selected.Name)
 	case FocusTags:
 		selected := m.tags[index]
@@ -1223,6 +1247,7 @@ func (m *Model) handleEnter() tea.Cmd {
 		m.status = fmt.Sprintf("Loading history for %s:%s...", m.selectedImage.Name, selected.Name)
 		m.clearFilter()
 		m.syncTable()
+		m.startLoading()
 		return loadHistoryCmd(m.registryClient, m.selectedImage.Name, selected.Name)
 	default:
 		return nil
@@ -1286,13 +1311,72 @@ func (m *Model) initialLoadCmd() tea.Cmd {
 	if m.tableSpec().SupportsProjects {
 		if projectClient, ok := m.registryClient.(registry.ProjectClient); ok {
 			m.status = fmt.Sprintf("Loading projects from %s...", m.registryHost)
+			m.startLoading()
 			return loadProjectsCmd(projectClient)
 		}
 		m.status = "Project listing is not available for this registry client"
 		return nil
 	}
 	m.status = fmt.Sprintf("Connecting to %s...", m.registryHost)
+	m.startLoading()
 	return loadImagesCmd(m.registryClient)
+}
+
+func (m *Model) startLoading() {
+	m.loadingCount++
+}
+
+func (m *Model) stopLoading() {
+	if m.loadingCount <= 0 {
+		return
+	}
+	m.loadingCount--
+}
+
+func (m Model) isLoading() bool {
+	return m.loadingCount > 0
+}
+
+func (m Model) emptyBodyMessage() string {
+	if m.isLoading() {
+		return "Loading, waiting for server response..."
+	}
+
+	filter := strings.TrimSpace(m.filterInput.Value())
+	if filter != "" {
+		return fmt.Sprintf("No results for filter %q", filter)
+	}
+
+	switch m.focus {
+	case FocusProjects:
+		return "No projects to display."
+	case FocusImages:
+		if m.hasSelectedProject {
+			return fmt.Sprintf("No images found in project %s.", m.selectedProject)
+		}
+		return "No images to display."
+	case FocusTags:
+		if m.hasSelectedImage {
+			return fmt.Sprintf("No tags found for %s.", m.selectedImage.Name)
+		}
+		return "No tags to display."
+	case FocusHistory:
+		if m.hasSelectedImage && m.hasSelectedTag {
+			return fmt.Sprintf("No history found for %s:%s.", m.selectedImage.Name, m.selectedTag.Name)
+		}
+		return "No history entries to display."
+	case FocusDockerHubTags:
+		query := strings.TrimSpace(m.dockerHubInput.Value())
+		if m.dockerHubImage != "" {
+			return fmt.Sprintf("No tags found for %s.", m.dockerHubImage)
+		}
+		if query == "" {
+			return "Type an image name and press Enter to search Docker Hub."
+		}
+		return fmt.Sprintf("No tags found for query %q.", query)
+	default:
+		return "No data to display."
+	}
 }
 
 func (m *Model) syncTable() {
