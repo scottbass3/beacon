@@ -39,7 +39,10 @@ func main() {
 		os.Exit(2)
 	}
 
-	program := tea.NewProgram(tui.NewModel(host, auth, logger, debug, logCh, contexts, currentContext), tea.WithAltScreen())
+	program := tea.NewProgram(
+		tui.NewModel(host, auth, logger, debug, logCh, contexts, currentContext),
+		tea.WithAltScreen(),
+	)
 	if err := program.Start(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

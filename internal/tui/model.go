@@ -29,6 +29,7 @@ const (
 	defaultTableHeight = 10
 	minTableHeight     = 4
 	maxLogLines        = 25
+	maxVisibleLogs     = 5
 	maxFilterWidth     = 40
 )
 
@@ -77,13 +78,16 @@ type Model struct {
 	dockerHubImage      string
 	dockerHubTags       []registry.Tag
 
-	commandActive    bool
-	commandInput     textinput.Model
-	commandMatches   []string
-	commandIndex     int
-	commandError     string
-	contexts         []ContextOption
-	contextNameIndex map[string]int
+	commandActive              bool
+	commandInput               textinput.Model
+	commandMatches             []string
+	commandIndex               int
+	commandError               string
+	commandPrevFilterActive    bool
+	commandPrevDockerHubSearch bool
+	contexts                   []ContextOption
+	contextNameIndex           map[string]int
+	tableColumns               []table.Column
 
 	debug  bool
 	logCh  <-chan string
@@ -149,6 +153,7 @@ var (
 	filterStyle    = lipgloss.NewStyle().Foreground(colorAccent)
 	emptyStyle     = lipgloss.NewStyle().Foreground(colorMuted).Italic(true)
 	logTitleStyle  = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+	logBoxStyle    = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1)
 	authTitleStyle = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
 	authErrorStyle = lipgloss.NewStyle().Foreground(colorAccent)
 )
@@ -425,87 +430,68 @@ func (m Model) View() string {
 	if m.authRequired && m.registryClient == nil {
 		return m.renderAuth()
 	}
-	if m.dockerHubActive {
-		header := m.renderDockerHubHeader()
-		body := m.renderBody()
-		footer := helpStyle.Render("Keys: s search  / filter  : command  r refresh  esc back  j/k or up/down move  q quit")
-		sections := []string{header, body, footer}
-		if m.debug {
-			sections = append(sections, m.renderLogs())
-		}
-		return strings.Join(sections, "\n\n")
+
+	sections := []string{
+		m.renderTopSection(),
+		m.renderMainSection(),
 	}
-	header := m.renderHeader()
-	body := m.renderBody()
-	footer := helpStyle.Render("Keys: q quit  esc up/clear  / filter  : command  r refresh  enter open  j/k or up/down move")
-	sections := []string{header, body, footer}
 	if m.debug {
 		sections = append(sections, m.renderLogs())
 	}
-	return strings.Join(sections, "\n\n")
+	return strings.Join(sections, "\n")
 }
 
-func (m Model) renderHeader() string {
+func (m Model) renderTopSection() string {
+	contextName := strings.TrimSpace(m.context)
+	if contextName == "" {
+		contextName = "-"
+	}
 	lines := []string{
 		titleStyle.Render("Beacon"),
 		labelStyle.Render(fmt.Sprintf("Status: %s", m.status)),
-		labelStyle.Render(fmt.Sprintf("Layer: %s", focusLabel(m.focus))),
+		labelStyle.Render(fmt.Sprintf("Context: %s", contextName)),
+		labelStyle.Render(fmt.Sprintf("Path: %s", m.currentPath())),
 	}
-	if m.context != "" {
-		lines = append(lines, labelStyle.Render(fmt.Sprintf("Context: %s", m.context)))
-	}
-	if path := m.breadcrumb(); path != "" {
-		lines = append(lines, labelStyle.Render(fmt.Sprintf("Path: %s", path)))
-	}
-	if m.filterActive {
-		lines = append(lines, filterStyle.Render(m.filterInput.View()))
-	} else if value := m.filterInput.Value(); value != "" {
-		lines = append(lines, filterStyle.Render("Filter: "+value))
-	}
-	if m.commandActive || m.commandInput.Value() != "" {
-		lines = append(lines, filterStyle.Render(m.commandInput.View()))
-		if len(m.commandMatches) > 0 {
-			lines = append(lines, labelStyle.Render("Commands: "+strings.Join(m.commandMatches, " ")))
-		}
-		if m.commandError != "" {
-			lines = append(lines, authErrorStyle.Render(m.commandError))
-		}
+	if inputLine := m.renderModeInputLine(); inputLine != "" {
+		lines = append(lines, filterStyle.Render(inputLine))
 	}
 	return strings.Join(lines, "\n")
 }
 
-func (m Model) renderDockerHubHeader() string {
-	lines := []string{
-		titleStyle.Render("Beacon"),
-		labelStyle.Render("Mode: Docker Hub"),
-		labelStyle.Render(fmt.Sprintf("Status: %s", m.status)),
+func (m Model) renderMainSection() string {
+	width := m.width
+	if width <= 0 {
+		width = 80
 	}
-	if m.context != "" {
-		lines = append(lines, labelStyle.Render(fmt.Sprintf("Context: %s", m.context)))
+	pageTitle := lipgloss.NewStyle().
+		Foreground(colorPrimary).
+		Bold(true).
+		Width(width).
+		Align(lipgloss.Center).
+		Render(focusLabel(m.focus))
+	return pageTitle + "\n" + m.renderBody()
+}
+
+func (m Model) renderModeInputLine() string {
+	if m.commandActive {
+		return m.commandInput.View()
 	}
-	if m.dockerHubImage != "" {
-		lines = append(lines, labelStyle.Render(fmt.Sprintf("Image: %s", m.dockerHubImage)))
+	if m.filterActive {
+		return m.filterInput.View()
 	}
-	searchLine := m.dockerHubInput.View()
+	if value := strings.TrimSpace(m.filterInput.Value()); value != "" {
+		return m.filterInput.Prompt + value
+	}
+	if !m.dockerHubActive {
+		return ""
+	}
 	if m.dockerHubInputFocus {
-		searchLine = filterStyle.Render(searchLine)
+		return m.dockerHubInput.View()
 	}
-	lines = append(lines, searchLine)
-	if m.filterActive {
-		lines = append(lines, filterStyle.Render(m.filterInput.View()))
-	} else if value := m.filterInput.Value(); value != "" {
-		lines = append(lines, filterStyle.Render("Filter: "+value))
+	if value := strings.TrimSpace(m.dockerHubInput.Value()); value != "" {
+		return "Search: " + value
 	}
-	if m.commandActive || m.commandInput.Value() != "" {
-		lines = append(lines, filterStyle.Render(m.commandInput.View()))
-		if len(m.commandMatches) > 0 {
-			lines = append(lines, labelStyle.Render("Commands: "+strings.Join(m.commandMatches, " ")))
-		}
-		if m.commandError != "" {
-			lines = append(lines, authErrorStyle.Render(m.commandError))
-		}
-	}
-	return strings.Join(lines, "\n")
+	return ""
 }
 
 func (m Model) renderAuth() string {
@@ -566,20 +552,53 @@ func (m Model) renderBody() string {
 }
 
 func (m Model) renderLogs() string {
-	var b strings.Builder
-	b.WriteString(logTitleStyle.Render("Requests"))
-	b.WriteString("\n")
-	b.WriteString(strings.Repeat("-", len("Requests")))
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+	contentWidth := maxInt(20, width-6)
+
+	lines := []string{logTitleStyle.Render("Requests")}
+	visible := m.visibleLogs()
+	if len(visible) == 0 {
+		lines = append(lines, emptyStyle.Render("(no requests yet)"))
+		for i := 1; i < maxVisibleLogs; i++ {
+			lines = append(lines, "")
+		}
+	} else {
+		start := 0
+		if len(visible) > maxVisibleLogs {
+			start = len(visible) - maxVisibleLogs
+		}
+		for _, entry := range visible[start:] {
+			lines = append(lines, truncateLogLine(entry, contentWidth))
+		}
+		for len(lines) < maxVisibleLogs+1 {
+			lines = append(lines, "")
+		}
+	}
+	return logBoxStyle.Width(width).Render(strings.Join(lines, "\n"))
+}
+
+func (m Model) visibleLogs() []string {
 	if len(m.logs) == 0 {
-		b.WriteString("\n")
-		b.WriteString(emptyStyle.Render("(no requests yet)"))
-		return b.String()
+		return nil
 	}
-	for _, entry := range m.logs {
-		b.WriteString("\n")
-		b.WriteString(entry)
+	count := minInt(len(m.logs), maxVisibleLogs)
+	return m.logs[len(m.logs)-count:]
+}
+
+func (m Model) currentPath() string {
+	if m.dockerHubActive {
+		if m.dockerHubImage != "" {
+			return "dockerhub/" + m.dockerHubImage
+		}
+		return "dockerhub"
 	}
-	return b.String()
+	if path := m.breadcrumb(); path != "" {
+		return path
+	}
+	return "/"
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -590,11 +609,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.syncTable()
 			return m, nil
 		case ":":
-			m.clearFilter()
 			return m.enterCommandMode()
 		case "enter":
-			m.filterActive = false
-			m.filterInput.Blur()
+			m.stopFilterEditing()
 			m.syncTable()
 			return m, nil
 		}
@@ -617,6 +634,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filterActive = true
 		m.filterInput.Focus()
 		m.filterInput.CursorEnd()
+		m.syncTable()
 		return m, nil
 	case ":":
 		return m.enterCommandMode()
@@ -628,6 +646,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if len(msg.Runes) == 1 && msg.Runes[0] == ':' {
 		return m.enterCommandMode()
+	}
+	if m.handleTableNavKey(msg) {
+		return m, nil
 	}
 
 	var cmd tea.Cmd
@@ -643,11 +664,9 @@ func (m Model) handleDockerHubKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.syncTable()
 			return m, nil
 		case ":":
-			m.clearFilter()
 			return m.enterCommandMode()
 		case "enter":
-			m.filterActive = false
-			m.filterInput.Blur()
+			m.stopFilterEditing()
 			m.syncTable()
 			return m, nil
 		}
@@ -686,6 +705,7 @@ func (m Model) handleDockerHubKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filterActive = true
 		m.filterInput.Focus()
 		m.filterInput.CursorEnd()
+		m.syncTable()
 		return m, nil
 	case "r":
 		return m, m.refreshDockerHub()
@@ -693,6 +713,9 @@ func (m Model) handleDockerHubKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if len(msg.Runes) == 1 && msg.Runes[0] == ':' {
 		return m.enterCommandMode()
+	}
+	if !m.dockerHubInputFocus && m.handleTableNavKey(msg) {
+		return m, nil
 	}
 
 	if len(msg.Runes) > 0 || msg.String() == "backspace" || msg.String() == "delete" {
@@ -706,6 +729,44 @@ func (m Model) handleDockerHubKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m *Model) handleTableNavKey(msg tea.KeyMsg) bool {
+	rowCount := len(m.table.Rows())
+	if rowCount == 0 {
+		return false
+	}
+	cursor := m.table.Cursor()
+	step := maxInt(1, m.table.Height())
+
+	switch msg.String() {
+	case "up", "k":
+		m.table.SetCursor(cursor - 1)
+		return true
+	case "down", "j":
+		m.table.SetCursor(cursor + 1)
+		return true
+	case "pgup", "b":
+		m.table.SetCursor(cursor - step)
+		return true
+	case "pgdown", "f", " ":
+		m.table.SetCursor(cursor + step)
+		return true
+	case "ctrl+u", "u":
+		m.table.SetCursor(cursor - maxInt(1, step/2))
+		return true
+	case "ctrl+d", "d":
+		m.table.SetCursor(cursor + maxInt(1, step/2))
+		return true
+	case "home", "g":
+		m.table.SetCursor(0)
+		return true
+	case "end", "G":
+		m.table.SetCursor(rowCount - 1)
+		return true
+	default:
+		return false
+	}
 }
 
 func (m Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -746,6 +807,15 @@ func (m Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) enterCommandMode() (tea.Model, tea.Cmd) {
+	m.commandPrevFilterActive = m.filterActive
+	m.commandPrevDockerHubSearch = m.dockerHubActive && m.dockerHubInputFocus
+	if m.filterActive {
+		m.stopFilterEditing()
+	}
+	if m.dockerHubInputFocus {
+		m.dockerHubInputFocus = false
+		m.dockerHubInput.Blur()
+	}
 	m.commandActive = true
 	m.commandError = ""
 	m.commandInput.SetValue("")
@@ -760,9 +830,24 @@ func (m Model) enterCommandMode() (tea.Model, tea.Cmd) {
 func (m Model) exitCommandMode() (tea.Model, tea.Cmd) {
 	m.commandActive = false
 	m.commandInput.Blur()
+	m.commandInput.SetValue("")
+	m.commandIndex = 0
 	m.commandError = ""
 	m.commandMatches = nil
-	return m, nil
+	var cmd tea.Cmd
+	if m.commandPrevFilterActive {
+		m.filterActive = true
+		cmd = m.filterInput.Focus()
+		m.filterInput.CursorEnd()
+	} else if m.commandPrevDockerHubSearch {
+		m.dockerHubInputFocus = true
+		cmd = m.dockerHubInput.Focus()
+		m.dockerHubInput.CursorEnd()
+	}
+	m.commandPrevFilterActive = false
+	m.commandPrevDockerHubSearch = false
+	m.syncTable()
+	return m, cmd
 }
 
 func (m Model) runCommand() (tea.Model, tea.Cmd) {
@@ -778,6 +863,8 @@ func (m Model) runCommand() (tea.Model, tea.Cmd) {
 	m.commandMatches = nil
 	m.commandIndex = 0
 	m.commandError = ""
+	m.commandPrevFilterActive = false
+	m.commandPrevDockerHubSearch = false
 	m.syncTable()
 
 	cmdName, args := parseCommand(input)
@@ -803,12 +890,14 @@ func (m Model) runCommand() (tea.Model, tea.Cmd) {
 func (m Model) switchContext(name string) (tea.Model, tea.Cmd) {
 	index, ok := m.contextNameIndex[strings.ToLower(strings.TrimSpace(name))]
 	if !ok {
-		m.commandError = fmt.Sprintf("Unknown context: %s", name)
+		m.commandError = ""
+		m.status = fmt.Sprintf("Unknown context: %s", name)
 		return m, nil
 	}
 	ctx := m.contexts[index]
 	if ctx.Host == "" {
-		m.commandError = fmt.Sprintf("Context %s has no registry configured", ctx.Name)
+		m.commandError = ""
+		m.status = fmt.Sprintf("Context %s has no registry configured", ctx.Name)
 		return m, nil
 	}
 
@@ -816,6 +905,8 @@ func (m Model) switchContext(name string) (tea.Model, tea.Cmd) {
 	m.commandInput.Blur()
 	m.commandError = ""
 	m.commandMatches = nil
+	m.commandPrevFilterActive = false
+	m.commandPrevDockerHubSearch = false
 
 	m.context = ctx.Name
 	m.registryHost = ctx.Host
@@ -1015,8 +1106,8 @@ func (m *Model) refreshCurrent() tea.Cmd {
 			m.status = fmt.Sprintf("Refreshing projects from %s...", m.registryHost)
 			return loadProjectsCmd(projectClient)
 		}
-		m.status = fmt.Sprintf("Refreshing images from %s...", m.registryHost)
-		return loadImagesCmd(m.registryClient)
+		m.status = "Project listing is not available for this registry client"
+		return nil
 	case FocusImages:
 		if m.registryClient == nil {
 			m.status = "Registry not configured"
@@ -1027,6 +1118,8 @@ func (m *Model) refreshCurrent() tea.Cmd {
 				m.status = fmt.Sprintf("Refreshing images for %s...", m.selectedProject)
 				return loadProjectImagesCmd(projectClient, m.selectedProject)
 			}
+			m.status = "Project images are not available for this registry client"
+			return nil
 		}
 		m.status = fmt.Sprintf("Refreshing images from %s...", m.registryHost)
 		return loadImagesCmd(m.registryClient)
@@ -1041,6 +1134,8 @@ func (m *Model) refreshCurrent() tea.Cmd {
 					m.status = fmt.Sprintf("Refreshing images for %s...", m.selectedProject)
 					return loadProjectImagesCmd(projectClient, m.selectedProject)
 				}
+				m.status = "Project images are not available for this registry client"
+				return nil
 			}
 			m.status = fmt.Sprintf("Refreshing images from %s...", m.registryHost)
 			return loadImagesCmd(m.registryClient)
@@ -1087,21 +1182,20 @@ func (m *Model) handleEnter() tea.Cmd {
 			return nil
 		}
 		selected := m.projects[index]
-		m.selectedProject = selected.Name
-		m.hasSelectedProject = true
-		m.images = nil
-		m.selectedImage = registry.Image{}
-		m.hasSelectedImage = false
-		m.tags = nil
-		m.focus = FocusImages
 		if projectClient, ok := m.registryClient.(registry.ProjectClient); ok {
+			m.selectedProject = selected.Name
+			m.hasSelectedProject = true
+			m.images = nil
+			m.selectedImage = registry.Image{}
+			m.hasSelectedImage = false
+			m.tags = nil
+			m.focus = FocusImages
 			m.status = fmt.Sprintf("Loading images for %s...", selected.Name)
 			m.clearFilter()
 			m.syncTable()
 			return loadProjectImagesCmd(projectClient, selected.Name)
 		}
-		m.status = fmt.Sprintf("Project: %s", selected.Name)
-		m.clearFilter()
+		m.status = "Project images are not available for this registry client"
 		m.syncTable()
 		return nil
 	case FocusImages:
@@ -1176,6 +1270,10 @@ func (m *Model) handleEscape() tea.Cmd {
 
 func (m *Model) clearFilter() {
 	m.filterInput.SetValue("")
+	m.stopFilterEditing()
+}
+
+func (m *Model) stopFilterEditing() {
 	m.filterInput.Blur()
 	m.filterActive = false
 }
@@ -1190,6 +1288,8 @@ func (m *Model) initialLoadCmd() tea.Cmd {
 			m.status = fmt.Sprintf("Loading projects from %s...", m.registryHost)
 			return loadProjectsCmd(projectClient)
 		}
+		m.status = "Project listing is not available for this registry client"
+		return nil
 	}
 	m.status = fmt.Sprintf("Connecting to %s...", m.registryHost)
 	return loadImagesCmd(m.registryClient)
@@ -1201,65 +1301,56 @@ func (m *Model) syncTable() {
 	if width <= 0 {
 		width = 80
 	}
+	filterWidth := clampInt(width-10, 10, maxFilterWidth)
+	m.filterInput.Width = filterWidth
+	m.dockerHubInput.Width = filterWidth
+	m.commandInput.Width = filterWidth
+
 	columns := makeColumns(m.focus, width, m.effectiveTableSpec())
 	rows := normalizeTableRows(toTableRows(list.rows), len(columns))
-	// Clear rows before changing columns to avoid mismatched row lengths during UpdateViewport.
-	m.table.SetRows(nil)
-	m.table.SetColumns(columns)
-	m.table.SetRows(rows)
-	m.table.SetHeight(m.tableHeight())
-	m.table.SetWidth(maxInt(10, width-2))
+	columnsChanged := !equalTableColumns(m.tableColumns, columns)
+	if columnsChanged {
+		// Clear rows only when column shape changes to avoid transient empty-frame flicker.
+		// This still protects bubbles/table from row/column length mismatches.
+		if len(m.table.Rows()) > 0 {
+			m.table.SetRows(nil)
+		}
+		m.table.SetColumns(columns)
+		m.tableColumns = append(m.tableColumns[:0], columns...)
+	}
+
+	if columnsChanged || !equalTableRows(m.table.Rows(), rows) {
+		m.table.SetRows(rows)
+	}
+
+	tableHeight := m.tableHeight()
+	if m.table.Height() != tableHeight {
+		m.table.SetHeight(tableHeight)
+	}
+	tableWidth := maxInt(10, width-2)
+	if m.table.Width() != tableWidth {
+		m.table.SetWidth(tableWidth)
+	}
 	cursor := m.table.Cursor()
 	if len(list.rows) == 0 {
 		m.table.SetCursor(0)
 	} else if cursor >= len(list.rows) {
 		m.table.SetCursor(len(list.rows) - 1)
 	}
-
-	filterWidth := clampInt(width-10, 10, maxFilterWidth)
-	m.filterInput.Width = filterWidth
-	m.dockerHubInput.Width = filterWidth
-	m.commandInput.Width = filterWidth
 }
 
 func (m Model) tableHeight() int {
 	if m.height <= 0 {
 		return defaultTableHeight
 	}
-
-	headerLines := 0
-	if m.dockerHubActive {
-		headerLines = 3
-		if m.dockerHubImage != "" {
-			headerLines++
-		}
-		if m.dockerHubInputFocus || m.dockerHubInput.Value() != "" {
-			headerLines++
-		}
-	} else {
-		headerLines = 3
-		if m.breadcrumb() != "" {
-			headerLines++
-		}
-	}
-	if m.filterActive || m.filterInput.Value() != "" {
-		headerLines++
-	}
-	if m.commandActive || m.commandInput.Value() != "" {
-		headerLines++
-		if len(m.commandMatches) > 0 || m.commandError != "" {
-			headerLines++
-		}
-	}
-
-	footerLines := 1
-	logLines := 0
+	topLines := lineCount(m.renderTopSection())
+	pageTitleLines := 1
+	debugLines := 0
 	if m.debug {
-		logLines = 2 + minInt(len(m.logs), m.logMax)
+		// Requests section: top/bottom border + title + fixed visible rows.
+		debugLines = maxVisibleLogs + 3
 	}
-
-	padding := 2
-	available := m.height - headerLines - footerLines - logLines - padding
+	available := m.height - topLines - pageTitleLines - debugLines
 	if available < minTableHeight {
 		return minTableHeight
 	}
@@ -1891,4 +1982,54 @@ func clampInt(value, minValue, maxValue int) int {
 		return maxValue
 	}
 	return value
+}
+
+func lineCount(value string) int {
+	if value == "" {
+		return 0
+	}
+	return strings.Count(value, "\n") + 1
+}
+
+func truncateLogLine(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	line := strings.TrimSpace(strings.ReplaceAll(value, "\n", " "))
+	if len(line) <= width {
+		return line
+	}
+	if width <= 3 {
+		return line[:width]
+	}
+	return line[:width-3] + "..."
+}
+
+func equalTableColumns(a, b []table.Column) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Title != b[i].Title || a[i].Width != b[i].Width {
+			return false
+		}
+	}
+	return true
+}
+
+func equalTableRows(a, b []table.Row) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if len(a[i]) != len(b[i]) {
+			return false
+		}
+		for j := range a[i] {
+			if a[i][j] != b[i][j] {
+				return false
+			}
+		}
+	}
+	return true
 }
