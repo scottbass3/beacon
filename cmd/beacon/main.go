@@ -48,7 +48,12 @@ func main() {
 
 func resolveRegistry(registryHost, configPath string) (registry.Auth, string, []tui.ContextOption, string, error) {
 	if registryHost != "" {
-		return registry.Auth{Kind: "none"}, registryHost, nil, "", nil
+		return registry.Auth{
+			Kind: "registry_v2",
+			RegistryV2: registry.RegistryV2Auth{
+				Anonymous: true,
+			},
+		}, registryHost, nil, "", nil
 	}
 
 	path := configPath

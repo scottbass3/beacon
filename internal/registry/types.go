@@ -10,6 +10,12 @@ type Image struct {
 	UpdatedAt  time.Time
 }
 
+type Project struct {
+	Name       string
+	ImageCount int
+	UpdatedAt  time.Time
+}
+
 type Tag struct {
 	Name         string
 	Digest       string

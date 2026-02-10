@@ -9,3 +9,10 @@ type Client interface {
 	DeleteTag(ctx context.Context, image, tag string) error
 	RenameTag(ctx context.Context, image, from, to string) error
 }
+
+// ProjectClient provides optional project-scoped operations for registries
+// that expose projects (for example Harbor).
+type ProjectClient interface {
+	ListProjects(ctx context.Context) ([]Project, error)
+	ListProjectImages(ctx context.Context, project string) ([]Image, error)
+}

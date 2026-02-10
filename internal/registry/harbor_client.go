@@ -34,45 +34,63 @@ func newHarborClient(baseURL *url.URL, auth Auth, logger RequestLogger) *HarborC
 }
 
 func (c *HarborClient) ListImages(ctx context.Context) ([]Image, error) {
-	var all []harborProject
-	page := 1
-	for {
-		var batch []harborProject
-		endpoint := c.resolve("/api/v2.0/projects", url.Values{
-			"page":      []string{fmt.Sprintf("%d", page)},
-			"page_size": []string{fmt.Sprintf("%d", harborPageSize)},
-		})
-		if err := c.doJSON(ctx, http.MethodGet, endpoint, nil, &batch); err != nil {
-			return nil, err
-		}
-		all = append(all, batch...)
-		if len(batch) < harborPageSize {
-			break
-		}
-		page++
+	projects, err := c.ListProjects(ctx)
+	if err != nil {
+		return nil, err
 	}
-
 	images := make([]Image, 0)
-	for _, project := range all {
-		repos, err := c.listProjectRepos(ctx, project.Name)
+	for _, project := range projects {
+		projectImages, err := c.ListProjectImages(ctx, project.Name)
 		if err != nil {
 			return nil, err
 		}
-		for _, repo := range repos {
-			images = append(images, Image{
-				Name:       repo.Name,
-				Repository: repo.Name,
-				TagCount:   repo.ArtifactCount,
-				PullCount:  repo.PullCount,
-				UpdatedAt:  parseHarborTime(repo.UpdateTime),
-			})
-		}
+		images = append(images, projectImages...)
 	}
 
 	sort.Slice(images, func(i, j int) bool {
 		return images[i].Name < images[j].Name
 	})
 
+	return images, nil
+}
+
+func (c *HarborClient) ListProjects(ctx context.Context) ([]Project, error) {
+	rawProjects, err := c.listProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	projects := make([]Project, 0, len(rawProjects))
+	for _, project := range rawProjects {
+		projects = append(projects, Project{
+			Name:       project.Name,
+			ImageCount: project.RepoCount,
+			UpdatedAt:  parseHarborTime(project.UpdateTime),
+		})
+	}
+	sort.Slice(projects, func(i, j int) bool {
+		return projects[i].Name < projects[j].Name
+	})
+	return projects, nil
+}
+
+func (c *HarborClient) ListProjectImages(ctx context.Context, project string) ([]Image, error) {
+	repos, err := c.listProjectRepos(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	images := make([]Image, 0, len(repos))
+	for _, repo := range repos {
+		images = append(images, Image{
+			Name:       repo.Name,
+			Repository: repo.Name,
+			TagCount:   repo.ArtifactCount,
+			PullCount:  repo.PullCount,
+			UpdatedAt:  parseHarborTime(repo.UpdateTime),
+		})
+	}
+	sort.Slice(images, func(i, j int) bool {
+		return images[i].Name < images[j].Name
+	})
 	return images, nil
 }
 
@@ -311,6 +329,27 @@ func parseHarborTime(value string) time.Time {
 		return parsed
 	}
 	return time.Time{}
+}
+
+func (c *HarborClient) listProjects(ctx context.Context) ([]harborProject, error) {
+	var all []harborProject
+	page := 1
+	for {
+		var batch []harborProject
+		endpoint := c.resolve("/api/v2.0/projects", url.Values{
+			"page":      []string{fmt.Sprintf("%d", page)},
+			"page_size": []string{fmt.Sprintf("%d", harborPageSize)},
+		})
+		if err := c.doJSON(ctx, http.MethodGet, endpoint, nil, &batch); err != nil {
+			return nil, err
+		}
+		all = append(all, batch...)
+		if len(batch) < harborPageSize {
+			break
+		}
+		page++
+	}
+	return all, nil
 }
 
 func (c *HarborClient) listProjectRepos(ctx context.Context, project string) ([]harborRepository, error) {

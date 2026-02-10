@@ -43,6 +43,7 @@ type Model struct {
 	registryHost   string
 	registryClient registry.Client
 	auth           registry.Auth
+	provider       registry.Provider
 	authRequired   bool
 	authError      string
 	authFocus      int
@@ -93,6 +94,17 @@ type Model struct {
 type imagesMsg struct {
 	images []registry.Image
 	err    error
+}
+
+type projectsMsg struct {
+	projects []registry.Project
+	err      error
+}
+
+type projectImagesMsg struct {
+	project string
+	images  []registry.Image
+	err     error
 }
 
 type tagsMsg struct {
@@ -183,6 +195,7 @@ func NewModel(registryHost string, auth registry.Auth, logger registry.RequestLo
 			auth.RegistryV2.Remember = true
 		}
 	}
+	provider := registry.ProviderForAuth(auth)
 
 	username := textinput.New()
 	username.Prompt = ""
@@ -206,7 +219,7 @@ func NewModel(registryHost string, auth registry.Auth, logger registry.RequestLo
 	case "harbor":
 		username.SetValue(auth.Harbor.Username)
 	}
-	if authNeedsPrompt(auth) {
+	if provider.NeedsAuthPrompt(auth) {
 		username.Focus()
 	}
 
@@ -218,7 +231,7 @@ func NewModel(registryHost string, auth registry.Auth, logger registry.RequestLo
 	return Model{
 		status: status,
 		focus: func() Focus {
-			if strings.EqualFold(auth.Kind, "harbor") {
+			if provider.TableSpec().SupportsProjects {
 				return FocusProjects
 			}
 			return FocusImages
@@ -226,7 +239,8 @@ func NewModel(registryHost string, auth registry.Auth, logger registry.RequestLo
 		context:          currentContext,
 		registryHost:     registryHost,
 		auth:             auth,
-		authRequired:     authNeedsPrompt(auth),
+		provider:         provider,
+		authRequired:     provider.NeedsAuthPrompt(auth),
 		authFocus:        0,
 		usernameInput:    username,
 		passwordInput:    password,
@@ -294,12 +308,52 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.hasSelectedTag = false
 		m.selectedTag = registry.Tag{}
 		m.focus = m.defaultFocus()
-		if m.isHarborKind() {
+		if m.tableSpec().SupportsProjects {
 			m.projects = deriveProjects(msg.images)
 			m.status = fmt.Sprintf("Loaded %d images across %d projects", len(msg.images), len(m.projects))
 		} else {
 			m.status = fmt.Sprintf("Loaded %d images", len(msg.images))
 		}
+		m.clearFilter()
+		m.syncTable()
+	case projectsMsg:
+		if msg.err != nil {
+			m.status = fmt.Sprintf("Error loading projects: %v", msg.err)
+			m.syncTable()
+			return m, nil
+		}
+		m.projects = toProjectInfos(msg.projects)
+		m.images = nil
+		m.tags = nil
+		m.history = nil
+		m.selectedProject = ""
+		m.hasSelectedProject = false
+		m.selectedImage = registry.Image{}
+		m.hasSelectedImage = false
+		m.selectedTag = registry.Tag{}
+		m.hasSelectedTag = false
+		m.focus = FocusProjects
+		m.status = fmt.Sprintf("Loaded %d projects", len(msg.projects))
+		m.clearFilter()
+		m.syncTable()
+	case projectImagesMsg:
+		if msg.err != nil {
+			m.status = fmt.Sprintf("Error loading images for %s: %v", msg.project, msg.err)
+			m.syncTable()
+			return m, nil
+		}
+		if !m.hasSelectedProject || m.selectedProject != msg.project {
+			return m, nil
+		}
+		m.images = msg.images
+		m.tags = nil
+		m.history = nil
+		m.selectedImage = registry.Image{}
+		m.hasSelectedImage = false
+		m.selectedTag = registry.Tag{}
+		m.hasSelectedTag = false
+		m.focus = FocusImages
+		m.status = fmt.Sprintf("Loaded %d images for %s", len(msg.images), msg.project)
 		m.clearFilter()
 		m.syncTable()
 	case tagsMsg:
@@ -361,8 +415,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.registryClient = msg.client
-		m.status = fmt.Sprintf("Connecting to %s...", m.registryHost)
-		return m, loadImagesCmd(m.registryClient)
+		return m, m.initialLoadCmd()
 	}
 
 	return m, nil
@@ -468,7 +521,7 @@ func (m Model) renderAuth() string {
 	username := m.usernameInput.View()
 	password := m.passwordInput.View()
 	remember := ""
-	if authShowsRemember(m.auth) {
+	if m.authUI().ShowRemember {
 		remember = "[ ] Remember"
 		if m.remember {
 			remember = "[x] Remember"
@@ -481,12 +534,12 @@ func (m Model) renderAuth() string {
 	if m.authFocus == 1 {
 		password = filterStyle.Render(password)
 	}
-	if m.authFocus == 2 && authShowsRemember(m.auth) {
+	if m.authFocus == 2 && m.authUI().ShowRemember {
 		remember = filterStyle.Render(remember)
 	}
 
 	help := "Keys: tab/shift+tab move  enter submit  q quit"
-	if authShowsRemember(m.auth) {
+	if m.authUI().ShowRemember {
 		help = "Keys: tab/shift+tab move  space toggle  enter submit  q quit"
 	}
 
@@ -772,9 +825,10 @@ func (m Model) switchContext(name string) (tea.Model, tea.Cmd) {
 	if m.auth.Kind == "registry_v2" && m.auth.RegistryV2.RefreshToken != "" {
 		m.auth.RegistryV2.Remember = true
 	}
+	m.provider = registry.ProviderForAuth(m.auth)
 
 	m.registryClient = nil
-	m.authRequired = authNeedsPrompt(m.auth)
+	m.authRequired = m.provider.NeedsAuthPrompt(m.auth)
 	m.authError = ""
 	m.authFocus = 0
 	m.usernameInput.SetValue("")
@@ -865,16 +919,16 @@ func (m Model) handleAuthKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c", "q":
 		return m, tea.Quit
 	case "tab", "down":
-		m.authFocus = (m.authFocus + 1) % authFieldCount(m.auth)
+		m.authFocus = (m.authFocus + 1) % m.authFieldCount()
 		m.syncAuthFocus()
 	case "shift+tab", "up":
 		m.authFocus--
 		if m.authFocus < 0 {
-			m.authFocus = authFieldCount(m.auth) - 1
+			m.authFocus = m.authFieldCount() - 1
 		}
 		m.syncAuthFocus()
 	case " ":
-		if m.authFocus == 2 && authShowsRemember(m.auth) {
+		if m.authFocus == 2 && m.authUI().ShowRemember {
 			m.remember = !m.remember
 		}
 	case "enter":
@@ -906,7 +960,7 @@ func (m Model) submitAuth() (tea.Model, tea.Cmd) {
 		auth.Harbor.Password = m.passwordInput.Value()
 	}
 
-	client, err := registry.NewHTTPClientWithLogger(m.registryHost, auth, m.logger)
+	client, err := registry.NewClientWithLogger(m.registryHost, auth, m.logger)
 	if err != nil {
 		m.authError = err.Error()
 		return m, nil
@@ -917,8 +971,7 @@ func (m Model) submitAuth() (tea.Model, tea.Cmd) {
 	m.registryClient = client
 	m.authRequired = false
 	m.authError = ""
-	m.status = fmt.Sprintf("Connecting to %s...", m.registryHost)
-	return m, loadImagesCmd(m.registryClient)
+	return m, m.initialLoadCmd()
 }
 
 func (m Model) enterDockerHubMode() (tea.Model, tea.Cmd) {
@@ -958,12 +1011,22 @@ func (m *Model) refreshCurrent() tea.Cmd {
 			m.status = "Registry not configured"
 			return nil
 		}
+		if projectClient, ok := m.registryClient.(registry.ProjectClient); ok {
+			m.status = fmt.Sprintf("Refreshing projects from %s...", m.registryHost)
+			return loadProjectsCmd(projectClient)
+		}
 		m.status = fmt.Sprintf("Refreshing images from %s...", m.registryHost)
 		return loadImagesCmd(m.registryClient)
 	case FocusImages:
 		if m.registryClient == nil {
 			m.status = "Registry not configured"
 			return nil
+		}
+		if m.hasSelectedProject {
+			if projectClient, ok := m.registryClient.(registry.ProjectClient); ok {
+				m.status = fmt.Sprintf("Refreshing images for %s...", m.selectedProject)
+				return loadProjectImagesCmd(projectClient, m.selectedProject)
+			}
 		}
 		m.status = fmt.Sprintf("Refreshing images from %s...", m.registryHost)
 		return loadImagesCmd(m.registryClient)
@@ -972,6 +1035,12 @@ func (m *Model) refreshCurrent() tea.Cmd {
 			if m.registryClient == nil {
 				m.status = "Registry not configured"
 				return nil
+			}
+			if m.hasSelectedProject {
+				if projectClient, ok := m.registryClient.(registry.ProjectClient); ok {
+					m.status = fmt.Sprintf("Refreshing images for %s...", m.selectedProject)
+					return loadProjectImagesCmd(projectClient, m.selectedProject)
+				}
 			}
 			m.status = fmt.Sprintf("Refreshing images from %s...", m.registryHost)
 			return loadImagesCmd(m.registryClient)
@@ -990,12 +1059,7 @@ func (m *Model) refreshCurrent() tea.Cmd {
 		m.status = fmt.Sprintf("Refreshing history for %s:%s...", m.selectedImage.Name, m.selectedTag.Name)
 		return loadHistoryCmd(m.registryClient, m.selectedImage.Name, m.selectedTag.Name)
 	default:
-		if m.registryClient == nil {
-			m.status = "Registry not configured"
-			return nil
-		}
-		m.status = fmt.Sprintf("Refreshing images from %s...", m.registryHost)
-		return loadImagesCmd(m.registryClient)
+		return m.initialLoadCmd()
 	}
 }
 
@@ -1025,10 +1089,17 @@ func (m *Model) handleEnter() tea.Cmd {
 		selected := m.projects[index]
 		m.selectedProject = selected.Name
 		m.hasSelectedProject = true
+		m.images = nil
 		m.selectedImage = registry.Image{}
 		m.hasSelectedImage = false
 		m.tags = nil
 		m.focus = FocusImages
+		if projectClient, ok := m.registryClient.(registry.ProjectClient); ok {
+			m.status = fmt.Sprintf("Loading images for %s...", selected.Name)
+			m.clearFilter()
+			m.syncTable()
+			return loadProjectImagesCmd(projectClient, selected.Name)
+		}
 		m.status = fmt.Sprintf("Project: %s", selected.Name)
 		m.clearFilter()
 		m.syncTable()
@@ -1083,7 +1154,7 @@ func (m *Model) handleEscape() tea.Cmd {
 		m.syncTable()
 		return nil
 	case FocusImages:
-		if m.isHarborKind() {
+		if m.tableSpec().SupportsProjects {
 			m.selectedProject = ""
 			m.hasSelectedProject = false
 			m.focus = FocusProjects
@@ -1109,14 +1180,33 @@ func (m *Model) clearFilter() {
 	m.filterActive = false
 }
 
+func (m *Model) initialLoadCmd() tea.Cmd {
+	if m.registryClient == nil {
+		m.status = "Registry not configured"
+		return nil
+	}
+	if m.tableSpec().SupportsProjects {
+		if projectClient, ok := m.registryClient.(registry.ProjectClient); ok {
+			m.status = fmt.Sprintf("Loading projects from %s...", m.registryHost)
+			return loadProjectsCmd(projectClient)
+		}
+	}
+	m.status = fmt.Sprintf("Connecting to %s...", m.registryHost)
+	return loadImagesCmd(m.registryClient)
+}
+
 func (m *Model) syncTable() {
 	list := m.listView()
 	width := m.width
 	if width <= 0 {
 		width = 80
 	}
-	m.table.SetColumns(makeColumns(m.focus, width))
-	m.table.SetRows(toTableRows(list.rows))
+	columns := makeColumns(m.focus, width, m.effectiveTableSpec())
+	rows := normalizeTableRows(toTableRows(list.rows), len(columns))
+	// Clear rows before changing columns to avoid mismatched row lengths during UpdateViewport.
+	m.table.SetRows(nil)
+	m.table.SetColumns(columns)
+	m.table.SetRows(rows)
 	m.table.SetHeight(m.tableHeight())
 	m.table.SetWidth(maxInt(10, width-2))
 	cursor := m.table.Cursor()
@@ -1205,18 +1295,33 @@ func (m Model) breadcrumb() string {
 }
 
 func (m Model) defaultFocus() Focus {
-	if m.isHarborKind() {
+	if m.tableSpec().SupportsProjects {
 		return FocusProjects
 	}
 	return FocusImages
 }
 
-func (m Model) isHarborKind() bool {
-	return strings.EqualFold(m.auth.Kind, "harbor")
+func (m Model) tableSpec() registry.TableSpec {
+	if m.provider == nil {
+		return registry.TableSpec{}
+	}
+	return m.provider.TableSpec()
+}
+
+func (m Model) effectiveTableSpec() registry.TableSpec {
+	spec := m.tableSpec()
+	if m.dockerHubActive || m.focus == FocusDockerHubTags {
+		spec.Tag = registry.TagTableSpec{
+			ShowSize:       true,
+			ShowPushed:     true,
+			ShowLastPulled: true,
+		}
+	}
+	return spec
 }
 
 func (m Model) visibleImages() []registry.Image {
-	if !m.isHarborKind() || !m.hasSelectedProject {
+	if !m.tableSpec().SupportsProjects || !m.hasSelectedProject {
 		return m.images
 	}
 	prefix := m.selectedProject + "/"
@@ -1225,6 +1330,12 @@ func (m Model) visibleImages() []registry.Image {
 		if strings.HasPrefix(image.Name, prefix) {
 			filtered = append(filtered, image)
 		}
+	}
+	// Harbor responses can be project-qualified ("project/repo") or plain ("repo"),
+	// depending on endpoint/version. If no project-qualified names are present,
+	// show the loaded list as-is.
+	if len(filtered) == 0 {
+		return m.images
 	}
 	return filtered
 }
@@ -1256,6 +1367,23 @@ func deriveProjects(images []registry.Image) []projectInfo {
 	return projects
 }
 
+func toProjectInfos(projects []registry.Project) []projectInfo {
+	if len(projects) == 0 {
+		return nil
+	}
+	items := make([]projectInfo, 0, len(projects))
+	for _, project := range projects {
+		items = append(items, projectInfo{
+			Name:       project.Name,
+			ImageCount: project.ImageCount,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Name < items[j].Name
+	})
+	return items
+}
+
 type listView struct {
 	headers []string
 	rows    [][]string
@@ -1264,55 +1392,88 @@ type listView struct {
 
 func (m Model) listView() listView {
 	filter := m.filterInput.Value()
+	spec := m.effectiveTableSpec()
 	switch m.focus {
 	case FocusProjects:
 		return filterRows(projectHeaders(), projectRows(m.projects), filter)
 	case FocusImages:
-		return filterRows(imageHeaders(), imageRows(m.visibleImages(), m.selectedProject, m.isHarborKind()), filter)
+		return filterRows(imageHeaders(spec.Image), imageRows(m.visibleImages(), m.selectedProject, spec.SupportsProjects, spec.Image), filter)
 	case FocusHistory:
-		return filterRows(historyHeaders(), historyRows(m.history), filter)
+		return filterRows(historyHeaders(spec.History), historyRows(m.history, spec.History), filter)
 	case FocusDockerHubTags:
-		return filterRows(tagHeaders(), tagRows(m.dockerHubTags), filter)
+		return filterRows(tagHeaders(spec.Tag), tagRows(m.dockerHubTags, spec.Tag), filter)
 	default:
-		return filterRows(tagHeaders(), tagRows(m.tags), filter)
+		return filterRows(tagHeaders(spec.Tag), tagRows(m.tags, spec.Tag), filter)
 	}
 }
 
-func imageHeaders() []string {
-	return []string{"Image", "Tags", "Pulls", "Updated"}
+func imageHeaders(spec registry.ImageTableSpec) []string {
+	headers := []string{"Image"}
+	if spec.ShowTagCount {
+		headers = append(headers, "Tags")
+	}
+	if spec.ShowPulls {
+		headers = append(headers, "Pulls")
+	}
+	if spec.ShowUpdated {
+		headers = append(headers, "Updated")
+	}
+	return headers
 }
 
 func projectHeaders() []string {
 	return []string{"Project", "Images"}
 }
 
-func tagHeaders() []string {
-	return []string{"Tag", "Size", "Pushed", "Last Pull"}
+func tagHeaders(spec registry.TagTableSpec) []string {
+	headers := []string{"Tag"}
+	if spec.ShowSize {
+		headers = append(headers, "Size")
+	}
+	if spec.ShowPushed {
+		headers = append(headers, "Pushed")
+	}
+	if spec.ShowLastPulled {
+		headers = append(headers, "Last Pull")
+	}
+	return headers
 }
 
-func historyHeaders() []string {
-	return []string{"Command", "Created", "Size", "Comment"}
+func historyHeaders(spec registry.HistoryTableSpec) []string {
+	headers := []string{"Command", "Created"}
+	if spec.ShowSize {
+		headers = append(headers, "Size")
+	}
+	if spec.ShowComment {
+		headers = append(headers, "Comment")
+	}
+	return headers
 }
 
-func imageRows(images []registry.Image, selectedProject string, harbor bool) [][]string {
+func imageRows(images []registry.Image, selectedProject string, supportsProjects bool, spec registry.ImageTableSpec) [][]string {
 	if len(images) == 0 {
 		return nil
 	}
 	rows := make([][]string, 0, len(images))
 	for _, image := range images {
 		name := image.Name
-		if harbor && selectedProject != "" {
+		if supportsProjects && selectedProject != "" {
 			prefix := selectedProject + "/"
 			if strings.HasPrefix(name, prefix) {
 				name = strings.TrimPrefix(name, prefix)
 			}
 		}
-		rows = append(rows, []string{
-			name,
-			formatCount(image.TagCount),
-			formatCount(image.PullCount),
-			formatTime(image.UpdatedAt),
-		})
+		row := []string{name}
+		if spec.ShowTagCount {
+			row = append(row, formatCount(image.TagCount))
+		}
+		if spec.ShowPulls {
+			row = append(row, formatCount(image.PullCount))
+		}
+		if spec.ShowUpdated {
+			row = append(row, formatTime(image.UpdatedAt))
+		}
+		rows = append(rows, row)
 	}
 	return rows
 }
@@ -1331,23 +1492,28 @@ func projectRows(projects []projectInfo) [][]string {
 	return rows
 }
 
-func tagRows(tags []registry.Tag) [][]string {
+func tagRows(tags []registry.Tag, spec registry.TagTableSpec) [][]string {
 	if len(tags) == 0 {
 		return nil
 	}
 	rows := make([][]string, 0, len(tags))
 	for _, tag := range tags {
-		rows = append(rows, []string{
-			tag.Name,
-			formatSize(tag.SizeBytes),
-			formatTime(tag.PushedAt),
-			formatTime(tag.LastPulledAt),
-		})
+		row := []string{tag.Name}
+		if spec.ShowSize {
+			row = append(row, formatSize(tag.SizeBytes))
+		}
+		if spec.ShowPushed {
+			row = append(row, formatTime(tag.PushedAt))
+		}
+		if spec.ShowLastPulled {
+			row = append(row, formatTime(tag.LastPulledAt))
+		}
+		rows = append(rows, row)
 	}
 	return rows
 }
 
-func historyRows(entries []registry.HistoryEntry) [][]string {
+func historyRows(entries []registry.HistoryEntry, spec registry.HistoryTableSpec) [][]string {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -1357,12 +1523,17 @@ func historyRows(entries []registry.HistoryEntry) [][]string {
 		if comment == "" && entry.EmptyLayer {
 			comment = "empty layer"
 		}
-		rows = append(rows, []string{
+		row := []string{
 			formatHistoryCommand(entry.CreatedBy),
 			formatTime(entry.CreatedAt),
-			formatSize(entry.SizeBytes),
-			firstNonEmpty(comment, "-"),
-		})
+		}
+		if spec.ShowSize {
+			row = append(row, formatSize(entry.SizeBytes))
+		}
+		if spec.ShowComment {
+			row = append(row, firstNonEmpty(comment, "-"))
+		}
+		rows = append(rows, row)
 	}
 	return rows
 }
@@ -1404,7 +1575,29 @@ func toTableRows(rows [][]string) []table.Row {
 	return out
 }
 
-func makeColumns(focus Focus, width int) []table.Column {
+func normalizeTableRows(rows []table.Row, columnCount int) []table.Row {
+	if len(rows) == 0 || columnCount <= 0 {
+		return rows
+	}
+	for i, row := range rows {
+		if len(row) == columnCount {
+			continue
+		}
+		if len(row) > columnCount {
+			rows[i] = row[:columnCount]
+			continue
+		}
+		padded := make(table.Row, columnCount)
+		copy(padded, row)
+		for j := len(row); j < columnCount; j++ {
+			padded[j] = ""
+		}
+		rows[i] = padded
+	}
+	return rows
+}
+
+func makeColumns(focus Focus, width int, spec registry.TableSpec) []table.Column {
 	spacing := 3
 	padding := 4
 	available := maxInt(40, width-padding)
@@ -1426,40 +1619,72 @@ func makeColumns(focus Focus, width int) []table.Column {
 			{Title: "Images", Width: countWidth},
 		}
 	case FocusImages:
-		columnCount := 4
-		spacingTotal := spacing * (columnCount - 1)
-		content := maxInt(20, available-spacingTotal)
-		nameWidth := maxInt(12, content-(countWidth+pullWidth+timeWidth))
-		return []table.Column{
-			{Title: "Image", Width: nameWidth},
-			{Title: "Tags", Width: countWidth},
-			{Title: "Pulls", Width: pullWidth},
-			{Title: "Updated", Width: timeWidth},
+		fixed := 0
+		columns := []table.Column{}
+		if spec.Image.ShowTagCount {
+			columns = append(columns, table.Column{Title: "Tags", Width: countWidth})
+			fixed += countWidth
 		}
-	case FocusHistory:
-		columnCount := 4
+		if spec.Image.ShowPulls {
+			columns = append(columns, table.Column{Title: "Pulls", Width: pullWidth})
+			fixed += pullWidth
+		}
+		if spec.Image.ShowUpdated {
+			columns = append(columns, table.Column{Title: "Updated", Width: timeWidth})
+			fixed += timeWidth
+		}
+		columnCount := len(columns) + 1
 		spacingTotal := spacing * (columnCount - 1)
 		content := maxInt(20, available-spacingTotal)
-		commandWidth := maxInt(12, content-(timeWidth+sizeWidth+commentWidth))
-		return []table.Column{
+		nameWidth := maxInt(12, content-fixed)
+		return append([]table.Column{{Title: "Image", Width: nameWidth}}, columns...)
+	case FocusHistory:
+		columnCount := 2
+		fixed := timeWidth
+		if spec.History.ShowSize {
+			columnCount++
+			fixed += sizeWidth
+		}
+		if spec.History.ShowComment {
+			columnCount++
+			fixed += commentWidth
+		}
+		spacingTotal := spacing * (columnCount - 1)
+		content := maxInt(20, available-spacingTotal)
+		commandWidth := maxInt(12, content-fixed)
+		columns := []table.Column{
 			{Title: "Command", Width: commandWidth},
 			{Title: "Created", Width: timeWidth},
-			{Title: "Size", Width: sizeWidth},
-			{Title: "Comment", Width: commentWidth},
 		}
+		if spec.History.ShowSize {
+			columns = append(columns, table.Column{Title: "Size", Width: sizeWidth})
+		}
+		if spec.History.ShowComment {
+			columns = append(columns, table.Column{Title: "Comment", Width: commentWidth})
+		}
+		return columns
 	case FocusDockerHubTags:
 		fallthrough
 	default:
-		columnCount := 4
+		fixed := 0
+		columns := []table.Column{}
+		if spec.Tag.ShowSize {
+			columns = append(columns, table.Column{Title: "Size", Width: sizeWidth})
+			fixed += sizeWidth
+		}
+		if spec.Tag.ShowPushed {
+			columns = append(columns, table.Column{Title: "Pushed", Width: timeWidth})
+			fixed += timeWidth
+		}
+		if spec.Tag.ShowLastPulled {
+			columns = append(columns, table.Column{Title: "Last Pull", Width: timeWidth})
+			fixed += timeWidth
+		}
+		columnCount := len(columns) + 1
 		spacingTotal := spacing * (columnCount - 1)
 		content := maxInt(20, available-spacingTotal)
-		nameWidth := maxInt(12, content-(sizeWidth+timeWidth+timeWidth))
-		return []table.Column{
-			{Title: "Tag", Width: nameWidth},
-			{Title: "Size", Width: sizeWidth},
-			{Title: "Pushed", Width: timeWidth},
-			{Title: "Last Pull", Width: timeWidth},
-		}
+		nameWidth := maxInt(12, content-fixed)
+		return append([]table.Column{{Title: "Tag", Width: nameWidth}}, columns...)
 	}
 }
 
@@ -1536,7 +1761,7 @@ func listenLogs(ch <-chan string) tea.Cmd {
 
 func initClientCmd(host string, auth registry.Auth, logger registry.RequestLogger) tea.Cmd {
 	return func() tea.Msg {
-		client, err := registry.NewHTTPClientWithLogger(host, auth, logger)
+		client, err := registry.NewClientWithLogger(host, auth, logger)
 		return initClientMsg{client: client, err: err}
 	}
 }
@@ -1572,6 +1797,26 @@ func loadImagesCmd(client registry.Client) tea.Cmd {
 
 		images, err := client.ListImages(ctx)
 		return imagesMsg{images: images, err: err}
+	}
+}
+
+func loadProjectsCmd(client registry.ProjectClient) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		projects, err := client.ListProjects(ctx)
+		return projectsMsg{projects: projects, err: err}
+	}
+}
+
+func loadProjectImagesCmd(client registry.ProjectClient, project string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		images, err := client.ListProjectImages(ctx, project)
+		return projectImagesMsg{project: project, images: images, err: err}
 	}
 }
 
@@ -1613,38 +1858,22 @@ func maxInt(a, b int) int {
 	return b
 }
 
-func authNeedsPrompt(auth registry.Auth) bool {
-	switch auth.Kind {
-	case "registry_v2":
-		if auth.RegistryV2.Anonymous {
-			return false
-		}
-		if auth.RegistryV2.Username == "" {
-			return true
-		}
-		if auth.RegistryV2.Password == "" && !(auth.RegistryV2.Remember && auth.RegistryV2.RefreshToken != "") {
-			return true
-		}
-		return false
-	case "harbor":
-		if auth.Harbor.Anonymous {
-			return false
-		}
-		return auth.Harbor.Username == "" || auth.Harbor.Password == ""
-	default:
-		return false
+func (m Model) authUI() registry.AuthUI {
+	if m.provider == nil {
+		return registry.AuthUI{}
 	}
+	return m.provider.AuthUI(m.auth)
 }
 
-func authShowsRemember(auth registry.Auth) bool {
-	return auth.Kind == "registry_v2"
-}
-
-func authFieldCount(auth registry.Auth) int {
-	if authShowsRemember(auth) {
+func (m Model) authFieldCount() int {
+	ui := m.authUI()
+	if ui.ShowRemember {
 		return 3
 	}
-	return 2
+	if ui.ShowUsername || ui.ShowPassword {
+		return 2
+	}
+	return 0
 }
 
 func minInt(a, b int) int {

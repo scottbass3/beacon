@@ -26,54 +26,15 @@ type HTTPClient struct {
 	registryExpiry time.Time
 }
 
-func NewHTTPClient(registryHost string, auth Auth) (Client, error) {
-	return NewHTTPClientWithLogger(registryHost, auth, nil)
-}
-
-func NewHTTPClientWithLogger(registryHost string, auth Auth, logger RequestLogger) (Client, error) {
-	trimmed := strings.TrimSpace(registryHost)
-	if trimmed == "" {
-		return nil, errors.New("registry host is required")
-	}
-	if !strings.Contains(trimmed, "://") {
-		trimmed = "https://" + trimmed
-	}
-
-	parsed, err := url.Parse(trimmed)
-	if err != nil {
-		return nil, fmt.Errorf("invalid registry host: %w", err)
-	}
-	if parsed.Host == "" {
-		return nil, errors.New("registry host must include a host name")
-	}
-	parsed.Path = strings.TrimSuffix(parsed.Path, "/")
-
-	auth.Normalize()
-	ApplyAuthCache(&auth, parsed.Host)
-	switch auth.Kind {
-	case "registry_v2":
-		if auth.RegistryV2.Service == "" {
-			auth.RegistryV2.Service = parsed.Host
-		}
-	case "harbor":
-		// Harbor API uses basic auth and does not require token-based auth.
-	}
-	if err := auth.Validate(); err != nil {
-		return nil, err
-	}
-
-	if auth.Kind == "harbor" {
-		return newHarborClient(parsed, auth, logger), nil
-	}
-
+func newRegistryV2Client(baseURL *url.URL, auth Auth, logger RequestLogger) *HTTPClient {
 	return &HTTPClient{
-		baseURL: parsed,
+		baseURL: baseURL,
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
 		},
 		auth:   auth,
 		logger: logger,
-	}, nil
+	}
 }
 
 func (c *HTTPClient) ListImages(ctx context.Context) ([]Image, error) {
