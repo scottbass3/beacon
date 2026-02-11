@@ -98,6 +98,40 @@ func (c *GitHubContainerClient) listTagsPage(ctx context.Context, image, next st
 	}, nil
 }
 
+func (c *GitHubContainerClient) ListTagHistory(ctx context.Context, image, tag string) ([]HistoryEntry, error) {
+	image = strings.Trim(strings.TrimSpace(image), "/")
+	tag = strings.TrimSpace(tag)
+	if image == "" {
+		return nil, errors.New("github container image is required")
+	}
+	if tag == "" {
+		return nil, errors.New("github container tag is required")
+	}
+
+	manifest, err := c.getManifest(ctx, image, tag)
+	if err != nil {
+		return nil, err
+	}
+	if manifest.Config.Digest == "" {
+		resolvedDigest := preferredManifestDigest(manifest)
+		if resolvedDigest != "" {
+			manifest, err = c.getManifest(ctx, image, resolvedDigest)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	if manifest.Config.Digest == "" {
+		return nil, fmt.Errorf("github config digest missing for %s:%s", image, tag)
+	}
+
+	cfg, err := c.getConfig(ctx, image, manifest.Config.Digest)
+	if err != nil {
+		return nil, err
+	}
+	return buildHistory(manifest, cfg), nil
+}
+
 func (c *GitHubContainerClient) doJSON(ctx context.Context, endpoint, image string, out interface{}) (http.Header, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -170,6 +204,60 @@ func (c *GitHubContainerClient) doWithAuth(ctx context.Context, req *http.Reques
 		return nil, retryErr
 	}
 	return retryResp, nil
+}
+
+func (c *GitHubContainerClient) getManifest(ctx context.Context, image, reference string) (manifestV2, error) {
+	endpoint := c.resolve("/v2/"+image+"/manifests/"+url.PathEscape(reference), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return manifestV2{}, err
+	}
+	req.Header.Set("Accept", strings.Join([]string{
+		"application/vnd.docker.distribution.manifest.v2+json",
+		"application/vnd.oci.image.manifest.v1+json",
+		"application/vnd.docker.distribution.manifest.list.v2+json",
+		"application/vnd.oci.image.index.v1+json",
+	}, ", "))
+
+	resp, err := c.doWithAuth(ctx, req, image)
+	if err != nil {
+		return manifestV2{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		return manifestV2{}, fmt.Errorf("github manifest request failed: %s", resp.Status)
+	}
+
+	var manifest manifestV2
+	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
+		return manifestV2{}, err
+	}
+	return manifest, nil
+}
+
+func (c *GitHubContainerClient) getConfig(ctx context.Context, image, digest string) (configV2, error) {
+	endpoint := c.resolve("/v2/"+image+"/blobs/"+url.PathEscape(digest), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return configV2{}, err
+	}
+
+	resp, err := c.doWithAuth(ctx, req, image)
+	if err != nil {
+		return configV2{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		return configV2{}, fmt.Errorf("github config request failed: %s", resp.Status)
+	}
+
+	var cfg configV2
+	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
+		return configV2{}, err
+	}
+	return cfg, nil
 }
 
 func (c *GitHubContainerClient) fetchToken(ctx context.Context, realm, service, scope string) (string, time.Time, error) {

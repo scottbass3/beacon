@@ -1489,20 +1489,37 @@ func (m Model) handleDockerHubKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	if m.dockerHubInputFocus {
+		switch msg.String() {
+		case "ctrl+c":
+			return m.openQuitConfirm()
+		case "esc":
+			return m.exitDockerHubMode()
+		case "enter":
+			query := strings.TrimSpace(m.dockerHubInput.Value())
+			if query == "" {
+				m.status = "Enter an image name to search Docker Hub"
+				return m, nil
+			}
+			return m, m.searchDockerHub(query)
+		}
+		var cmd tea.Cmd
+		m.dockerHubInput, cmd = m.dockerHubInput.Update(msg)
+		return m, cmd
+	}
+
 	switch msg.String() {
 	case "ctrl+c", "q":
 		return m.openQuitConfirm()
 	case "esc":
+		if m.focus == FocusHistory {
+			return m, m.handleEscape()
+		}
 		return m.exitDockerHubMode()
 	case ":":
 		return m.enterCommandMode()
 	case "enter":
-		query := strings.TrimSpace(m.dockerHubInput.Value())
-		if query == "" {
-			m.status = "Enter an image name to search Docker Hub"
-			return m, nil
-		}
-		return m, m.searchDockerHub(query)
+		return m, m.openDockerHubTagHistory()
 	case "s":
 		m.dockerHubInput.SetValue("")
 		m.dockerHubInputFocus = true
@@ -1564,20 +1581,37 @@ func (m Model) handleGitHubKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	if m.githubInputFocus {
+		switch msg.String() {
+		case "ctrl+c":
+			return m.openQuitConfirm()
+		case "esc":
+			return m.exitGitHubMode()
+		case "enter":
+			query := strings.TrimSpace(m.githubInput.Value())
+			if query == "" {
+				m.status = "Enter an image name to search GHCR (owner/image)"
+				return m, nil
+			}
+			return m, m.searchGitHub(query)
+		}
+		var cmd tea.Cmd
+		m.githubInput, cmd = m.githubInput.Update(msg)
+		return m, cmd
+	}
+
 	switch msg.String() {
 	case "ctrl+c", "q":
 		return m.openQuitConfirm()
 	case "esc":
+		if m.focus == FocusHistory {
+			return m, m.handleEscape()
+		}
 		return m.exitGitHubMode()
 	case ":":
 		return m.enterCommandMode()
 	case "enter":
-		query := strings.TrimSpace(m.githubInput.Value())
-		if query == "" {
-			m.status = "Enter an image name to search GHCR (owner/image)"
-			return m, nil
-		}
-		return m, m.searchGitHub(query)
+		return m, m.openGitHubTagHistory()
 	case "s":
 		m.githubInput.SetValue("")
 		m.githubInputFocus = true
@@ -2138,9 +2172,19 @@ func (m Model) exitGitHubMode() (tea.Model, tea.Cmd) {
 
 func (m *Model) refreshCurrent() tea.Cmd {
 	if m.githubActive {
+		if m.focus == FocusHistory && m.hasSelectedTag && strings.TrimSpace(m.githubImage) != "" {
+			m.status = fmt.Sprintf("Refreshing history for %s:%s...", m.githubImage, m.selectedTag.Name)
+			m.startLoading()
+			return loadGitHubHistoryCmd(m.githubImage, m.selectedTag.Name, m.logger)
+		}
 		return m.refreshGitHub()
 	}
 	if m.dockerHubActive {
+		if m.focus == FocusHistory && m.hasSelectedTag && strings.TrimSpace(m.dockerHubImage) != "" {
+			m.status = fmt.Sprintf("Refreshing history for %s:%s...", m.dockerHubImage, m.selectedTag.Name)
+			m.startLoading()
+			return loadDockerHubHistoryCmd(m.dockerHubImage, m.selectedTag.Name, m.logger)
+		}
 		return m.refreshDockerHub()
 	}
 	switch m.focus {
@@ -2241,6 +2285,38 @@ func (m *Model) searchDockerHub(query string) tea.Cmd {
 	m.startLoading()
 	m.syncTable()
 	return loadDockerHubTagsFirstPageCmd(query, m.logger)
+}
+
+func (m *Model) openDockerHubTagHistory() tea.Cmd {
+	if m.focus != FocusDockerHubTags {
+		return nil
+	}
+	list := m.listView()
+	cursor := m.table.Cursor()
+	if cursor < 0 || cursor >= len(list.indices) {
+		return nil
+	}
+	index := list.indices[cursor]
+	if index < 0 || index >= len(m.dockerHubTags) {
+		return nil
+	}
+	if strings.TrimSpace(m.dockerHubImage) == "" {
+		m.status = "Select an image first"
+		return nil
+	}
+
+	selected := m.dockerHubTags[index]
+	m.selectedImage = registry.Image{Name: m.dockerHubImage}
+	m.hasSelectedImage = true
+	m.selectedTag = selected
+	m.hasSelectedTag = true
+	m.history = nil
+	m.focus = FocusHistory
+	m.status = fmt.Sprintf("Loading history for %s:%s...", m.dockerHubImage, selected.Name)
+	m.clearFilter()
+	m.syncTable()
+	m.startLoading()
+	return loadDockerHubHistoryCmd(m.dockerHubImage, selected.Name, m.logger)
 }
 
 func (m *Model) maybeLoadDockerHubOnBottom(msg tea.KeyMsg) tea.Cmd {
@@ -2373,6 +2449,38 @@ func (m *Model) searchGitHub(query string) tea.Cmd {
 	return loadGitHubTagsFirstPageCmd(query, m.logger)
 }
 
+func (m *Model) openGitHubTagHistory() tea.Cmd {
+	if m.focus != FocusGitHubTags {
+		return nil
+	}
+	list := m.listView()
+	cursor := m.table.Cursor()
+	if cursor < 0 || cursor >= len(list.indices) {
+		return nil
+	}
+	index := list.indices[cursor]
+	if index < 0 || index >= len(m.githubTags) {
+		return nil
+	}
+	if strings.TrimSpace(m.githubImage) == "" {
+		m.status = "Select an image first"
+		return nil
+	}
+
+	selected := m.githubTags[index]
+	m.selectedImage = registry.Image{Name: m.githubImage}
+	m.hasSelectedImage = true
+	m.selectedTag = selected
+	m.hasSelectedTag = true
+	m.history = nil
+	m.focus = FocusHistory
+	m.status = fmt.Sprintf("Loading history for %s:%s...", m.githubImage, selected.Name)
+	m.clearFilter()
+	m.syncTable()
+	m.startLoading()
+	return loadGitHubHistoryCmd(m.githubImage, selected.Name, m.logger)
+}
+
 func (m *Model) maybeLoadGitHubOnBottom(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "down", "j", "pgdown", "f", " ", "ctrl+d", "d", "end", "G":
@@ -2498,7 +2606,13 @@ func (m *Model) handleEscape() tea.Cmd {
 		m.history = nil
 		m.selectedTag = registry.Tag{}
 		m.hasSelectedTag = false
-		m.focus = FocusTags
+		if m.dockerHubActive {
+			m.focus = FocusDockerHubTags
+		} else if m.githubActive {
+			m.focus = FocusGitHubTags
+		} else {
+			m.focus = FocusTags
+		}
 		m.clearFilter()
 		m.syncTable()
 		return nil
@@ -3362,6 +3476,28 @@ func loadGitHubTagsNextPageCmd(image, next string, logger registry.RequestLogger
 			next:       page.Next,
 			appendPage: true,
 		}
+	}
+}
+
+func loadDockerHubHistoryCmd(image, tag string, logger registry.RequestLogger) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		client := registry.NewDockerHubClient(logger)
+		history, err := client.ListTagHistory(ctx, image, tag)
+		return historyMsg{history: history, err: err}
+	}
+}
+
+func loadGitHubHistoryCmd(image, tag string, logger registry.RequestLogger) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		client := registry.NewGitHubContainerClient(logger)
+		history, err := client.ListTagHistory(ctx, image, tag)
+		return historyMsg{history: history, err: err}
 	}
 }
 
