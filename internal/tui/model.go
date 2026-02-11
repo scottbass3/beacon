@@ -35,17 +35,16 @@ const (
 )
 
 const (
-	defaultTableHeight       = 10
-	minTableHeight           = 1
-	maxLogLines              = 25
-	maxVisibleLogs           = 5
-	maxFilterWidth           = 40
-	tableChromeLines         = 2
-	mainSectionTitleLines    = 1
-	mainSectionBorderLines   = 2
-	mainSectionHChromeChars  = 4
-	defaultRenderWidth       = 80
-	defaultTableSelectedFill = 74
+	defaultTableHeight      = 10
+	minTableHeight          = 1
+	maxLogLines             = 25
+	maxVisibleLogs          = 5
+	maxFilterWidth          = 40
+	tableChromeLines        = 2
+	mainSectionTitleLines   = 1
+	mainSectionBorderLines  = 2
+	mainSectionHChromeChars = 4
+	defaultRenderWidth      = 80
 )
 
 type Model struct {
@@ -252,7 +251,7 @@ func NewModel(registryHost string, auth registry.Auth, logger registry.RequestLo
 	filter.Blur()
 
 	tbl := table.New()
-	tbl.SetStyles(tableStyles(defaultTableSelectedFill))
+	tbl.SetStyles(tableStyles())
 	tbl.SetHeight(defaultTableHeight)
 	tbl.Focus()
 
@@ -1993,7 +1992,7 @@ func (m *Model) syncTable() {
 	if m.table.Width() != tableWidth {
 		m.table.SetWidth(tableWidth)
 	}
-	m.table.SetStyles(tableStyles(tableWidth))
+	m.table.SetStyles(tableStyles())
 	cursor := m.table.Cursor()
 	if len(list.rows) == 0 {
 		m.table.SetCursor(0)
@@ -2355,9 +2354,18 @@ func normalizeTableRows(rows []table.Row, columnCount int) []table.Row {
 }
 
 func makeColumns(focus Focus, width int, spec registry.TableSpec) []table.Column {
-	spacing := 3
-	padding := 4
-	available := maxInt(40, width-padding)
+	contentWidth := func(columnCount int) int {
+		if columnCount <= 0 {
+			return maxInt(1, width)
+		}
+		// bubbles/table default cell style uses horizontal padding of 1 on each side.
+		// Reserve that padding so the rendered table width matches the viewport width.
+		available := width - (2 * columnCount)
+		if available < columnCount {
+			return columnCount
+		}
+		return available
+	}
 
 	timeWidth := 16
 	countWidth := 6
@@ -2368,9 +2376,8 @@ func makeColumns(focus Focus, width int, spec registry.TableSpec) []table.Column
 	switch focus {
 	case FocusProjects:
 		columnCount := 2
-		spacingTotal := spacing * (columnCount - 1)
-		content := maxInt(20, available-spacingTotal)
-		nameWidth := maxInt(12, content-countWidth)
+		content := contentWidth(columnCount)
+		nameWidth := maxInt(1, content-countWidth)
 		return []table.Column{
 			{Title: "Name", Width: nameWidth},
 			{Title: "Images", Width: countWidth},
@@ -2391,9 +2398,8 @@ func makeColumns(focus Focus, width int, spec registry.TableSpec) []table.Column
 			fixed += timeWidth
 		}
 		columnCount := len(columns) + 1
-		spacingTotal := spacing * (columnCount - 1)
-		content := maxInt(20, available-spacingTotal)
-		nameWidth := maxInt(12, content-fixed)
+		content := contentWidth(columnCount)
+		nameWidth := maxInt(1, content-fixed)
 		return append([]table.Column{{Title: "Name", Width: nameWidth}}, columns...)
 	case FocusHistory:
 		columnCount := 2
@@ -2406,9 +2412,8 @@ func makeColumns(focus Focus, width int, spec registry.TableSpec) []table.Column
 			columnCount++
 			fixed += commentWidth
 		}
-		spacingTotal := spacing * (columnCount - 1)
-		content := maxInt(20, available-spacingTotal)
-		commandWidth := maxInt(12, content-fixed)
+		content := contentWidth(columnCount)
+		commandWidth := maxInt(1, content-fixed)
 		columns := []table.Column{
 			{Title: "Command", Width: commandWidth},
 			{Title: "Created", Width: timeWidth},
@@ -2438,14 +2443,13 @@ func makeColumns(focus Focus, width int, spec registry.TableSpec) []table.Column
 			fixed += timeWidth
 		}
 		columnCount := len(columns) + 1
-		spacingTotal := spacing * (columnCount - 1)
-		content := maxInt(20, available-spacingTotal)
-		nameWidth := maxInt(12, content-fixed)
+		content := contentWidth(columnCount)
+		nameWidth := maxInt(1, content-fixed)
 		return append([]table.Column{{Title: "Name", Width: nameWidth}}, columns...)
 	}
 }
 
-func tableStyles(selectedWidth int) table.Styles {
+func tableStyles() table.Styles {
 	styles := table.DefaultStyles()
 	styles.Header = styles.Header.
 		BorderStyle(lipgloss.NormalBorder()).
@@ -2454,15 +2458,11 @@ func tableStyles(selectedWidth int) table.Styles {
 		Foreground(colorTitleText).
 		Background(colorSurface2).
 		Bold(true)
-	styles.Cell = styles.Cell.
-		Foreground(colorTitleText)
+	styles.Cell = lipgloss.NewStyle().Padding(0, 1)
 	styles.Selected = styles.Selected.
 		Foreground(colorSelected).
 		Background(colorAccent).
 		Bold(true)
-	if selectedWidth > 0 {
-		styles.Selected = styles.Selected.Width(selectedWidth).MaxWidth(selectedWidth)
-	}
 	return styles
 }
 
