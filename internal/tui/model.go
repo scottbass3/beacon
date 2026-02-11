@@ -25,6 +25,7 @@ const (
 	FocusTags
 	FocusHistory
 	FocusDockerHubTags
+	FocusGitHubTags
 )
 
 type confirmAction int
@@ -121,6 +122,16 @@ type Model struct {
 	dockerHubRetryUntil time.Time
 	dockerHubLoading    bool
 
+	githubActive     bool
+	githubPrevFocus  Focus
+	githubPrevStatus string
+	githubInput      textinput.Model
+	githubInputFocus bool
+	githubImage      string
+	githubTags       []registry.Tag
+	githubNext       string
+	githubLoading    bool
+
 	commandActive              bool
 	commandInput               textinput.Model
 	commandMatches             []string
@@ -128,6 +139,7 @@ type Model struct {
 	commandError               string
 	commandPrevFilterActive    bool
 	commandPrevDockerHubSearch bool
+	commandPrevGitHubSearch    bool
 	helpActive                 bool
 	contexts                   []ContextOption
 	contextNameIndex           map[string]int
@@ -174,6 +186,14 @@ type dockerHubTagsMsg struct {
 	rateLimit  registry.DockerHubRateLimit
 	appendPage bool
 	retryAfter time.Duration
+	err        error
+}
+
+type githubTagsMsg struct {
+	tags       []registry.Tag
+	image      string
+	next       string
+	appendPage bool
 	err        error
 }
 
@@ -292,9 +312,15 @@ func NewModel(registryHost string, auth registry.Auth, logger registry.RequestLo
 	dockerHubInput.CharLimit = 128
 	dockerHubInput.Blur()
 
+	githubInput := textinput.New()
+	githubInput.Prompt = "Search: "
+	githubInput.Placeholder = "owner/image"
+	githubInput.CharLimit = 128
+	githubInput.Blur()
+
 	commandInput := textinput.New()
 	commandInput.Prompt = ":"
-	commandInput.Placeholder = "help | context add | dockerhub"
+	commandInput.Placeholder = "help | context add | dockerhub | github"
 	commandInput.CharLimit = 64
 	commandInput.Blur()
 
@@ -399,6 +425,7 @@ func NewModel(registryHost string, auth registry.Auth, logger registry.RequestLo
 		filterInput:              filter,
 		table:                    tbl,
 		dockerHubInput:           dockerHubInput,
+		githubInput:              githubInput,
 		commandInput:             commandInput,
 		contexts:                 contexts,
 		contextNameIndex:         contextIndex,
@@ -433,6 +460,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			!m.commandActive &&
 			!m.filterActive &&
 			!(m.dockerHubActive && m.dockerHubInputFocus) &&
+			!(m.githubActive && m.githubInputFocus) &&
 			!m.isConfirmModalActive() &&
 			!m.isContextFormActive() &&
 			!m.isContextSelectionActive() &&
@@ -459,6 +487,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.dockerHubActive {
 			return m.handleDockerHubKey(msg)
+		}
+		if m.githubActive {
+			return m.handleGitHubKey(msg)
 		}
 		return m.handleKey(msg)
 	case tea.WindowSizeMsg:
@@ -598,6 +629,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = m.dockerHubLoadedStatus()
 		m.syncTable()
 		if cmd := m.maybeLoadDockerHubForFilter(); cmd != nil {
+			return m, cmd
+		}
+	case githubTagsMsg:
+		m.stopLoading()
+		m.githubLoading = false
+		if !m.githubActive {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.status = fmt.Sprintf("Error searching GHCR: %v", msg.err)
+			m.syncTable()
+			return m, nil
+		}
+		if msg.appendPage {
+			m.githubTags = append(m.githubTags, msg.tags...)
+		} else {
+			m.githubTags = msg.tags
+			m.clearFilter()
+		}
+		m.githubImage = msg.image
+		m.githubNext = msg.next
+		m.focus = FocusGitHubTags
+		m.status = m.githubLoadedStatus()
+		m.syncTable()
+		if cmd := m.maybeLoadGitHubForFilter(); cmd != nil {
 			return m, cmd
 		}
 	case logMsg:
@@ -740,6 +796,15 @@ func (m Model) renderModeInputLine() string {
 		return m.filterInput.Prompt + value
 	}
 	if !m.dockerHubActive {
+		if !m.githubActive {
+			return ""
+		}
+		if m.githubInputFocus {
+			return m.githubInput.View()
+		}
+		if value := strings.TrimSpace(m.githubInput.Value()); value != "" {
+			return "Search: " + value
+		}
 		return ""
 	}
 	if m.dockerHubInputFocus {
@@ -761,7 +826,11 @@ func (m Model) renderShortcutHintLine() string {
 		return "Filter: type text  enter apply  esc clear  : command  ? help"
 	case m.dockerHubActive && m.dockerHubInputFocus:
 		return "Docker Hub search: type image  enter search  esc exit Docker Hub  ? help"
+	case m.githubActive && m.githubInputFocus:
+		return "GHCR search: type image  enter search  esc exit GHCR  ? help"
 	case m.dockerHubActive:
+		return "Common: ? help  : command  / filter  s search  enter open  esc exit  r refresh  q quit"
+	case m.githubActive:
 		return "Common: ? help  : command  / filter  s search  enter open  esc exit  r refresh  q quit"
 	default:
 		return "Common: ? help  : command  / filter  enter open  esc back  r refresh  q quit"
@@ -838,6 +907,12 @@ func (m Model) helpPageTitle() string {
 		}
 		return "Docker Hub Tags"
 	}
+	if m.githubActive {
+		if m.githubInputFocus {
+			return "GHCR Search"
+		}
+		return "GHCR Tags"
+	}
 	if m.commandActive {
 		return "Command Input"
 	}
@@ -879,6 +954,14 @@ func (m Model) currentPageHelpEntries() []helpEntry {
 		)
 		return entries
 	}
+	if m.githubActive && m.githubInputFocus {
+		entries = append(entries,
+			helpEntry{Keys: "Type", Action: "Set GHCR image query"},
+			helpEntry{Keys: "Enter", Action: "Search image tags"},
+			helpEntry{Keys: "Esc", Action: "Exit GHCR mode"},
+		)
+		return entries
+	}
 
 	entries = append(entries,
 		helpEntry{Keys: "/", Action: "Filter current list"},
@@ -894,6 +977,14 @@ func (m Model) currentPageHelpEntries() []helpEntry {
 			helpEntry{Keys: "Enter", Action: "Open selected tag"},
 			helpEntry{Keys: "s", Action: "Focus Docker Hub search input"},
 			helpEntry{Keys: "Esc", Action: "Exit Docker Hub mode"},
+		)
+		return entries
+	}
+	if m.githubActive {
+		entries = append(entries,
+			helpEntry{Keys: "Enter", Action: "Open selected tag"},
+			helpEntry{Keys: "s", Action: "Focus GHCR search input"},
+			helpEntry{Keys: "Esc", Action: "Exit GHCR mode"},
 		)
 		return entries
 	}
@@ -933,6 +1024,10 @@ func availableCommands() []commandHelp {
 		{Command: "help", Usage: "Open the help page"},
 		{Command: "dockerhub", Usage: "Open Docker Hub mode"},
 		{Command: "dockerhub <image>", Usage: "Search Docker Hub image tags"},
+		{Command: "github", Usage: "Open GitHub Container Registry mode"},
+		{Command: "github <image>", Usage: "Search GHCR image tags"},
+		{Command: "ghcr", Usage: "Alias for github"},
+		{Command: "ghcr <image>", Usage: "Alias search for GHCR tags"},
 		{Command: "context", Usage: "Open context selection"},
 		{Command: "context add", Usage: "Create a new context"},
 		{Command: "context edit <name>", Usage: "Edit an existing context"},
@@ -1215,6 +1310,12 @@ func (m Model) currentPath() string {
 		}
 		return "dockerhub"
 	}
+	if m.githubActive {
+		if m.githubImage != "" {
+			return "ghcr/" + m.githubImage
+		}
+		return "ghcr"
+	}
 	if path := m.breadcrumb(); path != "" {
 		return path
 	}
@@ -1438,6 +1539,81 @@ func (m Model) handleDockerHubKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) handleGitHubKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.filterActive {
+		switch msg.String() {
+		case "esc":
+			m.clearFilter()
+			m.syncTable()
+			return m, nil
+		case ":":
+			return m.enterCommandMode()
+		case "enter":
+			m.stopFilterEditing()
+			m.syncTable()
+			return m, nil
+		}
+		before := m.filterInput.Value()
+		var cmd tea.Cmd
+		m.filterInput, cmd = m.filterInput.Update(msg)
+		if m.filterInput.Value() != before {
+			m.table.SetCursor(0)
+			m.syncTable()
+			return m, tea.Batch(cmd, m.maybeLoadGitHubForFilter())
+		}
+		return m, cmd
+	}
+
+	switch msg.String() {
+	case "ctrl+c", "q":
+		return m.openQuitConfirm()
+	case "esc":
+		return m.exitGitHubMode()
+	case ":":
+		return m.enterCommandMode()
+	case "enter":
+		query := strings.TrimSpace(m.githubInput.Value())
+		if query == "" {
+			m.status = "Enter an image name to search GHCR (owner/image)"
+			return m, nil
+		}
+		return m, m.searchGitHub(query)
+	case "s":
+		m.githubInput.SetValue("")
+		m.githubInputFocus = true
+		cmd := m.githubInput.Focus()
+		m.githubInput.CursorEnd()
+		return m, cmd
+	case "/":
+		m.filterActive = true
+		m.filterInput.Focus()
+		m.filterInput.CursorEnd()
+		m.syncTable()
+		return m, nil
+	case "r":
+		return m, m.refreshGitHub()
+	}
+
+	if len(msg.Runes) == 1 && msg.Runes[0] == ':' {
+		return m.enterCommandMode()
+	}
+	if !m.githubInputFocus && m.handleTableNavKey(msg) {
+		return m, m.maybeLoadGitHubOnBottom(msg)
+	}
+
+	if len(msg.Runes) > 0 || msg.String() == "backspace" || msg.String() == "delete" {
+		m.githubInputFocus = true
+		if !m.githubInput.Focused() {
+			return m, m.githubInput.Focus()
+		}
+		var cmd tea.Cmd
+		m.githubInput, cmd = m.githubInput.Update(msg)
+		return m, cmd
+	}
+
+	return m, nil
+}
+
 func (m *Model) handleTableNavKey(msg tea.KeyMsg) bool {
 	rowCount := len(m.table.Rows())
 	if rowCount == 0 {
@@ -1515,12 +1691,17 @@ func (m Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) enterCommandMode() (tea.Model, tea.Cmd) {
 	m.commandPrevFilterActive = m.filterActive
 	m.commandPrevDockerHubSearch = m.dockerHubActive && m.dockerHubInputFocus
+	m.commandPrevGitHubSearch = m.githubActive && m.githubInputFocus
 	if m.filterActive {
 		m.stopFilterEditing()
 	}
 	if m.dockerHubInputFocus {
 		m.dockerHubInputFocus = false
 		m.dockerHubInput.Blur()
+	}
+	if m.githubInputFocus {
+		m.githubInputFocus = false
+		m.githubInput.Blur()
 	}
 	m.commandActive = true
 	m.commandError = ""
@@ -1549,9 +1730,14 @@ func (m Model) exitCommandMode() (tea.Model, tea.Cmd) {
 		m.dockerHubInputFocus = true
 		cmd = m.dockerHubInput.Focus()
 		m.dockerHubInput.CursorEnd()
+	} else if m.commandPrevGitHubSearch {
+		m.githubInputFocus = true
+		cmd = m.githubInput.Focus()
+		m.githubInput.CursorEnd()
 	}
 	m.commandPrevFilterActive = false
 	m.commandPrevDockerHubSearch = false
+	m.commandPrevGitHubSearch = false
 	m.syncTable()
 	return m, cmd
 }
@@ -1571,6 +1757,7 @@ func (m Model) runCommand() (tea.Model, tea.Cmd) {
 	m.commandError = ""
 	m.commandPrevFilterActive = false
 	m.commandPrevDockerHubSearch = false
+	m.commandPrevGitHubSearch = false
 	m.syncTable()
 
 	cmdName, args := parseCommand(input)
@@ -1580,17 +1767,23 @@ func (m Model) runCommand() (tea.Model, tea.Cmd) {
 	case "dockerhub", "dh", "hub":
 		if len(args) > 0 {
 			query := strings.Join(args, " ")
-			m.dockerHubInput.SetValue(query)
-			m.dockerHubInput.CursorEnd()
-			m.dockerHubActive = true
-			m.dockerHubPrevFocus = m.focus
-			m.dockerHubPrevStatus = m.status
-			m.focus = FocusDockerHubTags
-			m.clearFilter()
-			m.syncTable()
-			return m, m.searchDockerHub(query)
+			model, _ := m.enterDockerHubMode()
+			next := model.(Model)
+			next.dockerHubInput.SetValue(query)
+			next.dockerHubInput.CursorEnd()
+			return next, next.searchDockerHub(query)
 		}
 		return m.enterDockerHubMode()
+	case "github", "ghcr":
+		if len(args) > 0 {
+			query := strings.Join(args, " ")
+			model, _ := m.enterGitHubMode()
+			next := model.(Model)
+			next.githubInput.SetValue(query)
+			next.githubInput.CursorEnd()
+			return next, next.searchGitHub(query)
+		}
+		return m.enterGitHubMode()
 	case "help":
 		return m.openHelp()
 	default:
@@ -1629,6 +1822,7 @@ func (m Model) switchContextAt(index int) (tea.Model, tea.Cmd) {
 	m.commandMatches = nil
 	m.commandPrevFilterActive = false
 	m.commandPrevDockerHubSearch = false
+	m.commandPrevGitHubSearch = false
 	m.contextSelectionActive = false
 	m.contextSelectionRequired = false
 	m.contextSelectionIndex = index
@@ -1672,12 +1866,21 @@ func (m Model) switchContextAt(index int) (tea.Model, tea.Cmd) {
 	m.focus = m.defaultFocus()
 	m.status = fmt.Sprintf("Registry: %s", m.registryHost)
 	m.dockerHubActive = false
+	m.dockerHubInputFocus = false
+	m.dockerHubInput.Blur()
 	m.dockerHubLoading = false
 	m.dockerHubImage = ""
 	m.dockerHubTags = nil
 	m.dockerHubNext = ""
 	m.dockerHubRateLimit = registry.DockerHubRateLimit{}
 	m.dockerHubRetryUntil = time.Time{}
+	m.githubActive = false
+	m.githubInputFocus = false
+	m.githubInput.Blur()
+	m.githubLoading = false
+	m.githubImage = ""
+	m.githubTags = nil
+	m.githubNext = ""
 	m.filterActive = false
 	m.filterInput.SetValue("")
 
@@ -1692,7 +1895,7 @@ func (m Model) switchContextAt(index int) (tea.Model, tea.Cmd) {
 }
 
 func matchCommands(prefix string) []string {
-	candidates := []string{"context", "ctx", "dockerhub", "hub", "help"}
+	candidates := []string{"context", "ctx", "dockerhub", "hub", "github", "ghcr", "help"}
 	if prefix == "" {
 		return candidates
 	}
@@ -1858,6 +2061,16 @@ func (m Model) submitAuth() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) enterDockerHubMode() (tea.Model, tea.Cmd) {
+	if m.githubActive {
+		m.focus = m.githubPrevFocus
+		if m.githubPrevStatus != "" {
+			m.status = m.githubPrevStatus
+		}
+	}
+	m.githubActive = false
+	m.githubInputFocus = false
+	m.githubInput.Blur()
+	m.githubLoading = false
 	m.dockerHubActive = true
 	m.dockerHubPrevFocus = m.focus
 	m.dockerHubPrevStatus = m.status
@@ -1885,7 +2098,48 @@ func (m Model) exitDockerHubMode() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) enterGitHubMode() (tea.Model, tea.Cmd) {
+	if m.dockerHubActive {
+		m.focus = m.dockerHubPrevFocus
+		if m.dockerHubPrevStatus != "" {
+			m.status = m.dockerHubPrevStatus
+		}
+	}
+	m.dockerHubActive = false
+	m.dockerHubInputFocus = false
+	m.dockerHubInput.Blur()
+	m.dockerHubLoading = false
+	m.githubActive = true
+	m.githubPrevFocus = m.focus
+	m.githubPrevStatus = m.status
+	m.focus = FocusGitHubTags
+	m.status = "GHCR search"
+	m.githubInputFocus = true
+	cmd := m.githubInput.Focus()
+	m.githubInput.CursorEnd()
+	m.clearFilter()
+	m.syncTable()
+	return m, cmd
+}
+
+func (m Model) exitGitHubMode() (tea.Model, tea.Cmd) {
+	m.githubActive = false
+	m.githubInputFocus = false
+	m.githubInput.Blur()
+	m.githubLoading = false
+	m.focus = m.githubPrevFocus
+	if m.githubPrevStatus != "" {
+		m.status = m.githubPrevStatus
+	}
+	m.clearFilter()
+	m.syncTable()
+	return m, nil
+}
+
 func (m *Model) refreshCurrent() tea.Cmd {
+	if m.githubActive {
+		return m.refreshGitHub()
+	}
 	if m.dockerHubActive {
 		return m.refreshDockerHub()
 	}
@@ -2092,6 +2346,88 @@ func (m Model) dockerHubLoadedStatus() string {
 	return status + m.dockerHubRateLimitSuffix()
 }
 
+func (m *Model) refreshGitHub() tea.Cmd {
+	query := strings.TrimSpace(m.githubInput.Value())
+	if query == "" {
+		m.status = "Enter an image name to search GHCR (owner/image)"
+		return nil
+	}
+	return m.searchGitHub(query)
+}
+
+func (m *Model) searchGitHub(query string) tea.Cmd {
+	if m.githubLoading {
+		m.status = "GHCR request already in progress"
+		return nil
+	}
+	m.githubInputFocus = false
+	m.githubInput.Blur()
+	m.table.Focus()
+	m.status = fmt.Sprintf("Searching GHCR for %s...", query)
+	m.githubTags = nil
+	m.githubImage = ""
+	m.githubNext = ""
+	m.githubLoading = true
+	m.startLoading()
+	m.syncTable()
+	return loadGitHubTagsFirstPageCmd(query, m.logger)
+}
+
+func (m *Model) maybeLoadGitHubOnBottom(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "down", "j", "pgdown", "f", " ", "ctrl+d", "d", "end", "G":
+	default:
+		return nil
+	}
+	if m.focus != FocusGitHubTags {
+		return nil
+	}
+	rows := m.table.Rows()
+	if len(rows) == 0 {
+		return nil
+	}
+	if m.table.Cursor() < len(rows)-1 {
+		return nil
+	}
+	return m.requestNextGitHubPage(false)
+}
+
+func (m *Model) maybeLoadGitHubForFilter() tea.Cmd {
+	filter := strings.TrimSpace(m.filterInput.Value())
+	if filter == "" {
+		return nil
+	}
+	if m.focus != FocusGitHubTags {
+		return nil
+	}
+	if len(m.table.Rows()) >= maxInt(1, m.table.Height()) {
+		return nil
+	}
+	return m.requestNextGitHubPage(true)
+}
+
+func (m *Model) requestNextGitHubPage(forFilter bool) tea.Cmd {
+	if m.githubLoading || m.githubNext == "" || m.githubImage == "" {
+		return nil
+	}
+	if forFilter {
+		m.status = fmt.Sprintf("Loading more tags for %s to match filter...", m.githubImage)
+	} else {
+		m.status = fmt.Sprintf("Loading more tags for %s...", m.githubImage)
+	}
+	m.githubLoading = true
+	m.startLoading()
+	return loadGitHubTagsNextPageCmd(m.githubImage, m.githubNext, m.logger)
+}
+
+func (m Model) githubLoadedStatus() string {
+	status := fmt.Sprintf("GHCR: %s (%d tags)", m.githubImage, len(m.githubTags))
+	if m.githubNext != "" {
+		status += " [more]"
+	}
+	return status
+}
+
 func (m *Model) handleEnter() tea.Cmd {
 	list := m.listView()
 	cursor := m.table.Cursor()
@@ -2276,6 +2612,15 @@ func (m Model) emptyBodyMessage() string {
 			return "Type an image name and press Enter to search Docker Hub."
 		}
 		return fmt.Sprintf("No tags found for query %q.", query)
+	case FocusGitHubTags:
+		query := strings.TrimSpace(m.githubInput.Value())
+		if m.githubImage != "" {
+			return fmt.Sprintf("No tags found for %s.", m.githubImage)
+		}
+		if query == "" {
+			return "Type an image name and press Enter to search GHCR."
+		}
+		return fmt.Sprintf("No tags found for query %q.", query)
 	default:
 		return "No data to display."
 	}
@@ -2290,6 +2635,7 @@ func (m *Model) syncTable() {
 	filterWidth := clampInt(width-10, 10, maxFilterWidth)
 	m.filterInput.Width = filterWidth
 	m.dockerHubInput.Width = filterWidth
+	m.githubInput.Width = filterWidth
 	m.commandInput.Width = filterWidth
 
 	tableWidth := maxInt(10, m.mainSectionContentWidth())
@@ -2357,6 +2703,8 @@ func focusLabel(focus Focus) string {
 		return "History"
 	case FocusDockerHubTags:
 		return "Docker Hub Tags"
+	case FocusGitHubTags:
+		return "GHCR Tags"
 	default:
 		return "Tags"
 	}
@@ -2396,6 +2744,12 @@ func (m Model) effectiveTableSpec() registry.TableSpec {
 			ShowSize:       true,
 			ShowPushed:     true,
 			ShowLastPulled: true,
+		}
+	} else if m.githubActive || m.focus == FocusGitHubTags {
+		spec.Tag = registry.TagTableSpec{
+			ShowSize:       false,
+			ShowPushed:     false,
+			ShowLastPulled: false,
 		}
 	}
 	return spec
@@ -2483,6 +2837,8 @@ func (m Model) listView() listView {
 		return filterRows(historyHeaders(spec.History), historyRows(m.history, spec.History), filter)
 	case FocusDockerHubTags:
 		return filterRows(tagHeaders(spec.Tag), tagRows(m.dockerHubTags, spec.Tag), filter)
+	case FocusGitHubTags:
+		return filterRows(tagHeaders(spec.Tag), tagRows(m.githubTags, spec.Tag), filter)
 	default:
 		return filterRows(tagHeaders(spec.Tag), tagRows(m.tags, spec.Tag), filter)
 	}
@@ -2752,6 +3108,8 @@ func makeColumns(focus Focus, width int, spec registry.TableSpec) []table.Column
 		return columns
 	case FocusDockerHubTags:
 		fallthrough
+	case FocusGitHubTags:
+		fallthrough
 	default:
 		fixed := 0
 		columns := []table.Column{}
@@ -2965,6 +3323,43 @@ func loadDockerHubTagsNextPageCmd(image, next string, logger registry.RequestLog
 			image:      page.Image,
 			next:       page.Next,
 			rateLimit:  page.RateLimit,
+			appendPage: true,
+		}
+	}
+}
+
+func loadGitHubTagsFirstPageCmd(query string, logger registry.RequestLogger) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		client := registry.NewGitHubContainerClient(logger)
+		page, err := client.SearchTagsPage(ctx, query)
+		if err != nil {
+			return githubTagsMsg{err: err}
+		}
+		return githubTagsMsg{
+			tags:  page.Tags,
+			image: page.Image,
+			next:  page.Next,
+		}
+	}
+}
+
+func loadGitHubTagsNextPageCmd(image, next string, logger registry.RequestLogger) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		client := registry.NewGitHubContainerClient(logger)
+		page, err := client.NextTagsPage(ctx, image, next)
+		if err != nil {
+			return githubTagsMsg{err: err, appendPage: true}
+		}
+		return githubTagsMsg{
+			tags:       page.Tags,
+			image:      page.Image,
+			next:       page.Next,
 			appendPage: true,
 		}
 	}

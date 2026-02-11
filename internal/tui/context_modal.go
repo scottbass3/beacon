@@ -652,12 +652,21 @@ func (m *Model) clearRegistryContext() {
 	m.filterActive = false
 	m.filterInput.SetValue("")
 	m.dockerHubActive = false
+	m.dockerHubInputFocus = false
+	m.dockerHubInput.Blur()
 	m.dockerHubLoading = false
 	m.dockerHubImage = ""
 	m.dockerHubTags = nil
 	m.dockerHubNext = ""
 	m.dockerHubRateLimit = registry.DockerHubRateLimit{}
 	m.dockerHubRetryUntil = time.Time{}
+	m.githubActive = false
+	m.githubInputFocus = false
+	m.githubInput.Blur()
+	m.githubLoading = false
+	m.githubImage = ""
+	m.githubTags = nil
+	m.githubNext = ""
 }
 
 func (m Model) persistContextOptions(contexts []ContextOption) error {
