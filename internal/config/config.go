@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -41,21 +42,50 @@ func Load(path string) (Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("invalid config JSON: %w", err)
 	}
-
-	for i := range cfg.Contexts {
-		cfg.Contexts[i].Name = strings.TrimSpace(cfg.Contexts[i].Name)
-		cfg.Contexts[i].Registry = strings.TrimSpace(cfg.Contexts[i].Registry)
-		cfg.Contexts[i].Kind = strings.TrimSpace(cfg.Contexts[i].Kind)
-		cfg.Contexts[i].Service = strings.TrimSpace(cfg.Contexts[i].Service)
-		if cfg.Contexts[i].Registry == "" {
-			return Config{}, fmt.Errorf("context %d missing registry", i+1)
-		}
-		if cfg.Contexts[i].Kind == "" {
-			return Config{}, fmt.Errorf("context %d missing kind", i+1)
-		}
+	if err := normalizeAndValidate(&cfg); err != nil {
+		return Config{}, err
 	}
 
 	return cfg, nil
+}
+
+func Ensure(path string) (Config, error) {
+	cfg, err := Load(path)
+	if err == nil {
+		return cfg, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return Config{}, err
+	}
+
+	cfg = Config{Contexts: []Context{}}
+	if err := Save(path, cfg); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+func Save(path string, cfg Config) error {
+	if err := normalizeAndValidate(&cfg); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(cfg.Contexts, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	data = append(data, '\n')
+
+	dir := filepath.Dir(path)
+	if dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create config directory: %w", err)
+		}
+	}
+
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("write config file: %w", err)
+	}
+	return nil
 }
 
 func (c *Config) UnmarshalJSON(data []byte) error {
@@ -84,4 +114,20 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	default:
 		return fmt.Errorf("invalid config JSON: expected array at root")
 	}
+}
+
+func normalizeAndValidate(cfg *Config) error {
+	for i := range cfg.Contexts {
+		cfg.Contexts[i].Name = strings.TrimSpace(cfg.Contexts[i].Name)
+		cfg.Contexts[i].Registry = strings.TrimSpace(cfg.Contexts[i].Registry)
+		cfg.Contexts[i].Kind = strings.TrimSpace(cfg.Contexts[i].Kind)
+		cfg.Contexts[i].Service = strings.TrimSpace(cfg.Contexts[i].Service)
+		if cfg.Contexts[i].Registry == "" {
+			return fmt.Errorf("context %d missing registry", i+1)
+		}
+		if cfg.Contexts[i].Kind == "" {
+			return fmt.Errorf("context %d missing kind", i+1)
+		}
+	}
+	return nil
 }

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -33,14 +32,14 @@ func main() {
 		logCh = nil
 	}
 
-	auth, host, contexts, currentContext, err := resolveRegistry(registryHost, configPath)
+	auth, host, contexts, currentContext, resolvedConfigPath, err := resolveRegistry(registryHost, configPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
 
 	program := tea.NewProgram(
-		tui.NewModel(host, auth, logger, debug, logCh, contexts, currentContext),
+		tui.NewModel(host, auth, logger, debug, logCh, contexts, currentContext, resolvedConfigPath),
 		tea.WithAltScreen(),
 	)
 	if err := program.Start(); err != nil {
@@ -49,42 +48,38 @@ func main() {
 	}
 }
 
-func resolveRegistry(registryHost, configPath string) (registry.Auth, string, []tui.ContextOption, string, error) {
-	if registryHost != "" {
-		return registry.Auth{
-			Kind: "registry_v2",
-			RegistryV2: registry.RegistryV2Auth{
-				Anonymous: true,
-			},
-		}, registryHost, nil, "", nil
-	}
-
+func resolveRegistry(registryHost, configPath string) (registry.Auth, string, []tui.ContextOption, string, string, error) {
 	path := configPath
 	if path == "" {
 		path = config.DefaultPath()
 	}
 
-	cfg, err := config.Load(path)
+	cfg, err := config.Ensure(path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return registry.Auth{}, "", nil, "", fmt.Errorf("config file not found: %s", path)
-		}
-		return registry.Auth{}, "", nil, "", err
+		return registry.Auth{}, "", nil, "", path, err
 	}
-
-	if len(cfg.Contexts) == 0 {
-		return registry.Auth{}, "", nil, "", fmt.Errorf("no contexts configured in %s", path)
-	}
-
-	ctx := cfg.Contexts[0]
 
 	contexts := make([]tui.ContextOption, 0, len(cfg.Contexts))
 	for _, ctx := range cfg.Contexts {
 		contexts = append(contexts, toContextOption(ctx))
 	}
 
+	if registryHost != "" {
+		return registry.Auth{
+			Kind: "registry_v2",
+			RegistryV2: registry.RegistryV2Auth{
+				Anonymous: true,
+			},
+		}, registryHost, contexts, "", path, nil
+	}
+
+	if len(cfg.Contexts) == 0 {
+		return registry.Auth{}, "", contexts, "", path, nil
+	}
+
+	ctx := cfg.Contexts[0]
 	current := ctx.Name
-	return toContextOption(ctx).Auth, ctx.Registry, contexts, current, nil
+	return toContextOption(ctx).Auth, ctx.Registry, contexts, current, path, nil
 }
 
 func toContextOption(ctx config.Context) tui.ContextOption {

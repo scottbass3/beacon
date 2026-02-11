@@ -55,14 +55,30 @@ type Model struct {
 	focus   Focus
 	context string
 
-	contextSelectionActive bool
-	contextSelectionIndex  int
-	contextSelectionError  string
+	contextSelectionActive   bool
+	contextSelectionRequired bool
+	contextSelectionIndex    int
+	contextSelectionError    string
+
+	contextFormActive          bool
+	contextFormMode            contextFormMode
+	contextFormIndex           int
+	contextFormReturnSelection bool
+	contextFormAllowSkip       bool
+	contextFormError           string
+	contextFormFocus           int
+	contextFormNameInput       textinput.Model
+	contextFormRegistryInput   textinput.Model
+	contextFormKindInput       textinput.Model
+	contextFormServiceInput    textinput.Model
+	contextFormAnonymous       bool
 
 	confirmAction  confirmAction
 	confirmTitle   string
 	confirmMessage string
 	confirmFocus   int
+
+	configPath string
 
 	registryHost   string
 	registryClient registry.Client
@@ -235,12 +251,12 @@ type ContextOption struct {
 	Auth registry.Auth
 }
 
-func NewModel(registryHost string, auth registry.Auth, logger registry.RequestLogger, debug bool, logCh <-chan string, contexts []ContextOption, currentContext string) Model {
+func NewModel(registryHost string, auth registry.Auth, logger registry.RequestLogger, debug bool, logCh <-chan string, contexts []ContextOption, currentContext, configPath string) Model {
 	status := "Registry not configured"
 	if registryHost != "" {
 		status = fmt.Sprintf("Registry: %s", registryHost)
 	}
-	if strings.TrimSpace(currentContext) == "" && len(contexts) > 0 {
+	if strings.TrimSpace(currentContext) == "" && len(contexts) > 0 && registryHost == "" {
 		currentContext = contexts[0].Name
 	}
 
@@ -263,9 +279,19 @@ func NewModel(registryHost string, auth registry.Auth, logger registry.RequestLo
 
 	commandInput := textinput.New()
 	commandInput.Prompt = ":"
-	commandInput.Placeholder = "context <name> | dockerhub"
+	commandInput.Placeholder = "context | context add | dockerhub"
 	commandInput.CharLimit = 64
 	commandInput.Blur()
+
+	contextNameInput := newContextInput("name")
+	contextRegistryInput := newContextInput("https://registry.example.com")
+	contextKindInput := newContextInput("registry_v2 | harbor")
+	contextServiceInput := newContextInput("optional service")
+	contextKindInput.SetValue("registry_v2")
+	contextNameInput.Blur()
+	contextRegistryInput.Blur()
+	contextKindInput.Blur()
+	contextServiceInput.Blur()
 
 	auth.Normalize()
 	if registryHost != "" {
@@ -304,13 +330,18 @@ func NewModel(registryHost string, auth registry.Auth, logger registry.RequestLo
 	for i, ctx := range contexts {
 		contextIndex[strings.ToLower(ctx.Name)] = i
 	}
-	contextSelectionActive := len(contexts) > 1
+	contextSelectionActive := registryHost == "" && len(contexts) > 1
+	contextSelectionRequired := contextSelectionActive
+	contextFormStartup := registryHost == "" && len(contexts) == 0
 	contextSelectionIndex := 0
 	if i, ok := contextIndex[strings.ToLower(strings.TrimSpace(currentContext))]; ok {
 		contextSelectionIndex = i
 	}
 	if contextSelectionActive {
 		status = "Select context to continue"
+	} else if contextFormStartup {
+		status = "No contexts configured. Add one or continue without context."
+		contextNameInput.Focus()
 	} else if authRequired {
 		username.Focus()
 	}
@@ -327,27 +358,39 @@ func NewModel(registryHost string, auth registry.Auth, logger registry.RequestLo
 			}
 			return FocusImages
 		}(),
-		context:                displayContext,
-		contextSelectionActive: contextSelectionActive,
-		contextSelectionIndex:  contextSelectionIndex,
-		registryHost:           registryHost,
-		auth:                   auth,
-		provider:               provider,
-		authRequired:           authRequired,
-		authFocus:              0,
-		usernameInput:          username,
-		passwordInput:          password,
-		remember:               remember,
-		filterInput:            filter,
-		table:                  tbl,
-		dockerHubInput:         dockerHubInput,
-		commandInput:           commandInput,
-		contexts:               contexts,
-		contextNameIndex:       contextIndex,
-		debug:                  debug,
-		logCh:                  logCh,
-		logMax:                 maxLogLines,
-		logger:                 logger,
+		context:                  displayContext,
+		contextSelectionActive:   contextSelectionActive,
+		contextSelectionRequired: contextSelectionRequired,
+		contextSelectionIndex:    contextSelectionIndex,
+		contextFormActive:        contextFormStartup,
+		contextFormMode:          contextFormModeAdd,
+		contextFormIndex:         -1,
+		contextFormAllowSkip:     contextFormStartup,
+		contextFormFocus:         contextFormFocusName,
+		contextFormNameInput:     contextNameInput,
+		contextFormRegistryInput: contextRegistryInput,
+		contextFormKindInput:     contextKindInput,
+		contextFormServiceInput:  contextServiceInput,
+		contextFormAnonymous:     true,
+		configPath:               configPath,
+		registryHost:             registryHost,
+		auth:                     auth,
+		provider:                 provider,
+		authRequired:             authRequired,
+		authFocus:                0,
+		usernameInput:            username,
+		passwordInput:            password,
+		remember:                 remember,
+		filterInput:              filter,
+		table:                    tbl,
+		dockerHubInput:           dockerHubInput,
+		commandInput:             commandInput,
+		contexts:                 contexts,
+		contextNameIndex:         contextIndex,
+		debug:                    debug,
+		logCh:                    logCh,
+		logMax:                   maxLogLines,
+		logger:                   logger,
 	}
 }
 
@@ -370,6 +413,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.isConfirmModalActive() {
 			return m.handleConfirmKey(msg)
+		}
+		if m.isContextFormActive() {
+			return m.handleContextFormKey(msg)
 		}
 		if m.isContextSelectionActive() {
 			return m.handleContextSelectionKey(msg)
@@ -550,6 +596,9 @@ func (m Model) View() string {
 	if m.isContextSelectionActive() {
 		view = m.renderModal(view, m.renderContextSelectionModal())
 	}
+	if m.isContextFormActive() {
+		view = m.renderModal(view, m.renderContextFormModal())
+	}
 	if m.isAuthModalActive() {
 		view = m.renderModal(view, m.renderAuthModal())
 	}
@@ -680,7 +729,7 @@ func (m Model) renderContextSelectionModal() string {
 		lines = append(lines,
 			modalErrorStyle.Render("No contexts configured."),
 			"",
-			modalHelpStyle.Render("q quit"),
+			modalHelpStyle.Render("a add context  esc close  q quit"),
 		)
 		return m.renderModalCard(strings.Join(lines, "\n"), 84)
 	}
@@ -714,7 +763,7 @@ func (m Model) renderContextSelectionModal() string {
 	}
 	lines = append(lines,
 		"",
-		modalHelpStyle.Render("up/down move  enter select  q quit"),
+		modalHelpStyle.Render(m.contextSelectionHelpText()),
 	)
 	return m.renderModalCard(strings.Join(lines, "\n"), 84)
 }
@@ -877,11 +926,15 @@ func (m Model) modalViewport(base string) (int, int) {
 }
 
 func (m Model) isContextSelectionActive() bool {
-	return m.contextSelectionActive && len(m.contexts) > 1
+	return m.contextSelectionActive
+}
+
+func (m Model) isContextFormActive() bool {
+	return m.contextFormActive
 }
 
 func (m Model) isAuthModalActive() bool {
-	return !m.isContextSelectionActive() && m.authRequired && m.registryClient == nil
+	return !m.isContextSelectionActive() && !m.isContextFormActive() && m.authRequired && m.registryClient == nil
 }
 
 func (m Model) isConfirmModalActive() bool {
@@ -946,15 +999,31 @@ func (m Model) currentPath() string {
 func (m Model) handleContextSelectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if len(m.contexts) == 0 {
 		switch msg.String() {
-		case "ctrl+c", "q", "esc":
+		case "ctrl+c":
 			return m.openQuitConfirm()
+		case "q":
+			return m.openQuitConfirm()
+		case "esc":
+			if m.contextSelectionRequired {
+				return m.openQuitConfirm()
+			}
+			return m.closeContextSelection()
+		case "a":
+			return m.openContextFormAdd(true, false)
 		}
 		return m, nil
 	}
 
 	switch msg.String() {
-	case "ctrl+c", "q", "esc":
+	case "ctrl+c":
 		return m.openQuitConfirm()
+	case "q":
+		return m.openQuitConfirm()
+	case "esc":
+		if m.contextSelectionRequired {
+			return m.openQuitConfirm()
+		}
+		return m.closeContextSelection()
 	case "up", "k", "shift+tab":
 		m.contextSelectionIndex--
 		if m.contextSelectionIndex < 0 {
@@ -974,6 +1043,8 @@ func (m Model) handleContextSelectionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.contextSelectionIndex = len(m.contexts) - 1
 		m.contextSelectionError = ""
 		return m, nil
+	case "a":
+		return m.openContextFormAdd(true, false)
 	case "enter":
 		selected := clampInt(m.contextSelectionIndex, 0, len(m.contexts)-1)
 		return m.switchContextAt(selected)
@@ -1250,12 +1321,8 @@ func (m Model) runCommand() (tea.Model, tea.Cmd) {
 	cmdName, args := parseCommand(input)
 	switch cmdName {
 	case "context", "ctx":
-		if len(args) == 0 {
-			m.status = fmt.Sprintf("Usage: :ctx <name>. Available: %s", strings.Join(contextNames(m.contexts), ", "))
-			return m, nil
-		}
-		return m.switchContext(strings.Join(args, " "))
-	case "dockerhub", "dh":
+		return m.runContextCommand(args)
+	case "dockerhub", "dh", "hub":
 		if len(args) > 0 {
 			query := strings.Join(args, " ")
 			m.dockerHubInput.SetValue(query)
@@ -1276,7 +1343,7 @@ func (m Model) runCommand() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) switchContext(name string) (tea.Model, tea.Cmd) {
-	index, ok := m.contextNameIndex[strings.ToLower(strings.TrimSpace(name))]
+	index, ok := m.resolveContextIndex(name)
 	if !ok {
 		m.commandError = ""
 		m.status = fmt.Sprintf("Unknown context: %s", name)
@@ -1306,6 +1373,7 @@ func (m Model) switchContextAt(index int) (tea.Model, tea.Cmd) {
 	m.commandPrevFilterActive = false
 	m.commandPrevDockerHubSearch = false
 	m.contextSelectionActive = false
+	m.contextSelectionRequired = false
 	m.contextSelectionIndex = index
 	m.contextSelectionError = ""
 
