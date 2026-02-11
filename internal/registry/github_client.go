@@ -7,10 +7,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"path"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/scottbass3/beacon/internal/registry/history"
 )
 
 const githubContainerBaseURL = "https://ghcr.io"
@@ -107,29 +108,7 @@ func (c *GitHubContainerClient) ListTagHistory(ctx context.Context, image, tag s
 	if tag == "" {
 		return nil, errors.New("github container tag is required")
 	}
-
-	manifest, err := c.getManifest(ctx, image, tag)
-	if err != nil {
-		return nil, err
-	}
-	if manifest.Config.Digest == "" {
-		resolvedDigest := preferredManifestDigest(manifest)
-		if resolvedDigest != "" {
-			manifest, err = c.getManifest(ctx, image, resolvedDigest)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-	if manifest.Config.Digest == "" {
-		return nil, fmt.Errorf("github config digest missing for %s:%s", image, tag)
-	}
-
-	cfg, err := c.getConfig(ctx, image, manifest.Config.Digest)
-	if err != nil {
-		return nil, err
-	}
-	return buildHistory(manifest, cfg), nil
+	return listTagHistoryFromManifest(ctx, "github", image, tag, c.getManifest, c.getConfig)
 }
 
 func (c *GitHubContainerClient) doJSON(ctx context.Context, endpoint, image string, out interface{}) (http.Header, error) {
@@ -206,11 +185,11 @@ func (c *GitHubContainerClient) doWithAuth(ctx context.Context, req *http.Reques
 	return retryResp, nil
 }
 
-func (c *GitHubContainerClient) getManifest(ctx context.Context, image, reference string) (manifestV2, error) {
+func (c *GitHubContainerClient) getManifest(ctx context.Context, image, reference string) (history.ManifestV2, error) {
 	endpoint := c.resolve("/v2/"+image+"/manifests/"+url.PathEscape(reference), nil)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return manifestV2{}, err
+		return history.ManifestV2{}, err
 	}
 	req.Header.Set("Accept", strings.Join([]string{
 		"application/vnd.docker.distribution.manifest.v2+json",
@@ -221,82 +200,49 @@ func (c *GitHubContainerClient) getManifest(ctx context.Context, image, referenc
 
 	resp, err := c.doWithAuth(ctx, req, image)
 	if err != nil {
-		return manifestV2{}, err
+		return history.ManifestV2{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return manifestV2{}, fmt.Errorf("github manifest request failed: %s", resp.Status)
+		return history.ManifestV2{}, fmt.Errorf("github manifest request failed: %s", resp.Status)
 	}
 
-	var manifest manifestV2
+	var manifest history.ManifestV2
 	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
-		return manifestV2{}, err
+		return history.ManifestV2{}, err
 	}
 	return manifest, nil
 }
 
-func (c *GitHubContainerClient) getConfig(ctx context.Context, image, digest string) (configV2, error) {
+func (c *GitHubContainerClient) getConfig(ctx context.Context, image, digest string) (history.ConfigV2, error) {
 	endpoint := c.resolve("/v2/"+image+"/blobs/"+url.PathEscape(digest), nil)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return configV2{}, err
+		return history.ConfigV2{}, err
 	}
 
 	resp, err := c.doWithAuth(ctx, req, image)
 	if err != nil {
-		return configV2{}, err
+		return history.ConfigV2{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return configV2{}, fmt.Errorf("github config request failed: %s", resp.Status)
+		return history.ConfigV2{}, fmt.Errorf("github config request failed: %s", resp.Status)
 	}
 
-	var cfg configV2
+	var cfg history.ConfigV2
 	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
-		return configV2{}, err
+		return history.ConfigV2{}, err
 	}
 	return cfg, nil
 }
 
 func (c *GitHubContainerClient) fetchToken(ctx context.Context, realm, service, scope string) (string, time.Time, error) {
-	tokenURL, err := url.Parse(realm)
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("invalid github token realm: %w", err)
-	}
-	query := tokenURL.Query()
-	if service != "" {
-		query.Set("service", service)
-	}
-	if scope != "" {
-		query.Set("scope", scope)
-	}
-	tokenURL.RawQuery = query.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tokenURL.String(), nil)
+	token, expiry, err := fetchBearerToken(ctx, c.httpClient, c.logger, realm, service, scope)
 	if err != nil {
 		return "", time.Time{}, err
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	c.logRequest(req, resp)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		return "", time.Time{}, fmt.Errorf("github token request failed: %s", resp.Status)
-	}
-
-	token, _, expiry, err := decodeTokenResponse(resp)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	if token == "" {
-		return "", time.Time{}, errors.New("github token response missing token")
 	}
 	return token, expiry, nil
 }
@@ -325,26 +271,11 @@ func (c *GitHubContainerClient) cacheToken(token string, expiry time.Time) {
 }
 
 func (c *GitHubContainerClient) resolve(p string, query url.Values) string {
-	resolved := *c.baseURL
-	resolved.Path = strings.TrimSuffix(resolved.Path, "/") + p
-	if query != nil {
-		resolved.RawQuery = query.Encode()
-	}
-	return resolved.String()
+	return resolveURL(c.baseURL, p, query)
 }
 
 func (c *GitHubContainerClient) resolveNext(next string) string {
-	if next == "" {
-		return ""
-	}
-	parsed, err := url.Parse(next)
-	if err != nil || parsed.Host != "" {
-		return next
-	}
-	resolved := *c.baseURL
-	resolved.Path = path.Join(strings.TrimSuffix(c.baseURL.Path, "/"), strings.TrimPrefix(parsed.Path, "/"))
-	resolved.RawQuery = parsed.RawQuery
-	return resolved.String()
+	return resolveNextURL(c.baseURL, next)
 }
 
 func (c *GitHubContainerClient) logRequest(req *http.Request, resp *http.Response) {
@@ -407,38 +338,6 @@ func normalizeGitHubContainerInput(input string) (string, error) {
 		}
 	}
 	return trimmed, nil
-}
-
-func parseBearerChallenge(value string) (realm, service, scope string, ok bool) {
-	parts := strings.SplitN(strings.TrimSpace(value), " ", 2)
-	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-		return "", "", "", false
-	}
-
-	for _, segment := range strings.Split(parts[1], ",") {
-		segment = strings.TrimSpace(segment)
-		if segment == "" {
-			continue
-		}
-		kv := strings.SplitN(segment, "=", 2)
-		if len(kv) != 2 {
-			continue
-		}
-		key := strings.ToLower(strings.TrimSpace(kv[0]))
-		val := strings.Trim(strings.TrimSpace(kv[1]), `"`)
-		switch key {
-		case "realm":
-			realm = val
-		case "service":
-			service = val
-		case "scope":
-			scope = val
-		}
-	}
-	if realm == "" {
-		return "", "", "", false
-	}
-	return realm, service, scope, true
 }
 
 func parseGitHubContainerNext(headerValue string, baseURL *url.URL) string {

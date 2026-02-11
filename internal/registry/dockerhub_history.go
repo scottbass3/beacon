@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/scottbass3/beacon/internal/registry/history"
 )
 
 const dockerHubRegistryBaseURL = "https://registry-1.docker.io"
@@ -20,35 +22,14 @@ func (c *DockerHubClient) ListTagHistory(ctx context.Context, image, tag string)
 	if tag == "" {
 		return nil, fmt.Errorf("docker hub tag is required")
 	}
-
-	manifest, err := c.getRegistryManifest(ctx, image, tag)
-	if err != nil {
-		return nil, err
-	}
-	if manifest.Config.Digest == "" {
-		resolvedDigest := preferredManifestDigest(manifest)
-		if resolvedDigest != "" {
-			manifest, err = c.getRegistryManifest(ctx, image, resolvedDigest)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-	if manifest.Config.Digest == "" {
-		return nil, fmt.Errorf("docker hub config digest missing for %s:%s", image, tag)
-	}
-	cfg, err := c.getRegistryConfig(ctx, image, manifest.Config.Digest)
-	if err != nil {
-		return nil, err
-	}
-	return buildHistory(manifest, cfg), nil
+	return listTagHistoryFromManifest(ctx, "docker hub", image, tag, c.getRegistryManifest, c.getRegistryConfig)
 }
 
-func (c *DockerHubClient) getRegistryManifest(ctx context.Context, image, reference string) (manifestV2, error) {
+func (c *DockerHubClient) getRegistryManifest(ctx context.Context, image, reference string) (history.ManifestV2, error) {
 	endpoint := fmt.Sprintf("%s/v2/%s/manifests/%s", dockerHubRegistryBaseURL, image, url.PathEscape(reference))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return manifestV2{}, err
+		return history.ManifestV2{}, err
 	}
 	req.Header.Set("Accept", strings.Join([]string{
 		"application/vnd.docker.distribution.manifest.v2+json",
@@ -59,41 +40,41 @@ func (c *DockerHubClient) getRegistryManifest(ctx context.Context, image, refere
 
 	resp, err := c.doRegistryRequest(ctx, req, image)
 	if err != nil {
-		return manifestV2{}, err
+		return history.ManifestV2{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return manifestV2{}, fmt.Errorf("docker hub manifest request failed: %s", resp.Status)
+		return history.ManifestV2{}, fmt.Errorf("docker hub manifest request failed: %s", resp.Status)
 	}
 
-	var manifest manifestV2
+	var manifest history.ManifestV2
 	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
-		return manifestV2{}, err
+		return history.ManifestV2{}, err
 	}
 	return manifest, nil
 }
 
-func (c *DockerHubClient) getRegistryConfig(ctx context.Context, image, digest string) (configV2, error) {
+func (c *DockerHubClient) getRegistryConfig(ctx context.Context, image, digest string) (history.ConfigV2, error) {
 	endpoint := fmt.Sprintf("%s/v2/%s/blobs/%s", dockerHubRegistryBaseURL, image, url.PathEscape(digest))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return configV2{}, err
+		return history.ConfigV2{}, err
 	}
 
 	resp, err := c.doRegistryRequest(ctx, req, image)
 	if err != nil {
-		return configV2{}, err
+		return history.ConfigV2{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return configV2{}, fmt.Errorf("docker hub config request failed: %s", resp.Status)
+		return history.ConfigV2{}, fmt.Errorf("docker hub config request failed: %s", resp.Status)
 	}
 
-	var cfg configV2
+	var cfg history.ConfigV2
 	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
-		return configV2{}, err
+		return history.ConfigV2{}, err
 	}
 	return cfg, nil
 }
@@ -122,7 +103,7 @@ func (c *DockerHubClient) doRegistryRequest(ctx context.Context, req *http.Reque
 		scope = fmt.Sprintf("repository:%s:pull", image)
 	}
 
-	token, err := fetchBearerToken(ctx, c.httpClient, c.logger, realm, service, scope)
+	token, _, err := fetchBearerToken(ctx, c.httpClient, c.logger, realm, service, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -140,61 +121,4 @@ func (c *DockerHubClient) doRegistryRequest(ctx context.Context, req *http.Reque
 		return nil, retryErr
 	}
 	return retryResp, nil
-}
-
-func fetchBearerToken(ctx context.Context, client *http.Client, logger RequestLogger, realm, service, scope string) (string, error) {
-	tokenURL, err := url.Parse(realm)
-	if err != nil {
-		return "", fmt.Errorf("invalid token realm: %w", err)
-	}
-	query := tokenURL.Query()
-	if service != "" {
-		query.Set("service", service)
-	}
-	if scope != "" {
-		query.Set("scope", scope)
-	}
-	tokenURL.RawQuery = query.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tokenURL.String(), nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := client.Do(req)
-	logRequestWithLogger(logger, req, resp)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		return "", fmt.Errorf("token request failed: %s", resp.Status)
-	}
-
-	token, _, _, err := decodeTokenResponse(resp)
-	if err != nil {
-		return "", err
-	}
-	if token == "" {
-		return "", fmt.Errorf("token response missing token")
-	}
-	return token, nil
-}
-
-func logRequestWithLogger(logger RequestLogger, req *http.Request, resp *http.Response) {
-	if logger == nil {
-		return
-	}
-	status := 0
-	if resp != nil {
-		status = resp.StatusCode
-	}
-	logger(RequestLog{
-		Method:  req.Method,
-		URL:     req.URL.String(),
-		Headers: cloneHeader(req.Header),
-		Status:  status,
-	})
 }

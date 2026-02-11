@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/scottbass3/beacon/internal/registry/history"
 )
 
 const defaultCatalogPageSize = 1000
@@ -70,19 +72,7 @@ func (c *HTTPClient) ListTagHistory(ctx context.Context, image, tag string) ([]H
 	if image == "" || tag == "" {
 		return nil, nil
 	}
-
-	manifest, err := c.getManifest(ctx, image, tag)
-	if err != nil {
-		return nil, err
-	}
-	if manifest.Config.Digest == "" {
-		return nil, nil
-	}
-	cfg, err := c.getConfig(ctx, image, manifest.Config.Digest)
-	if err != nil {
-		return nil, err
-	}
-	return buildHistory(manifest, cfg), nil
+	return listTagHistoryFromManifest(ctx, "registry", image, tag, c.getManifest, c.getConfig)
 }
 
 func (c *HTTPClient) DeleteTag(ctx context.Context, image, tag string) error {
@@ -167,75 +157,70 @@ func (c *HTTPClient) listTags(ctx context.Context, repository string) ([]Tag, er
 	return tags, nil
 }
 
-func (c *HTTPClient) getManifest(ctx context.Context, image, reference string) (manifestV2, error) {
+func (c *HTTPClient) getManifest(ctx context.Context, image, reference string) (history.ManifestV2, error) {
 	endpoint := c.resolve("/v2/"+image+"/manifests/"+reference, nil)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return manifestV2{}, err
+		return history.ManifestV2{}, err
 	}
 	req.Header.Set("Accept", strings.Join([]string{
 		"application/vnd.docker.distribution.manifest.v2+json",
 		"application/vnd.oci.image.manifest.v1+json",
+		"application/vnd.docker.distribution.manifest.list.v2+json",
+		"application/vnd.oci.image.index.v1+json",
 	}, ", "))
 	if err := c.applyAuth(ctx, req); err != nil {
-		return manifestV2{}, err
+		return history.ManifestV2{}, err
 	}
 
 	resp, err := c.httpClient.Do(req)
 	c.logRequest(req, resp)
 	if err != nil {
-		return manifestV2{}, err
+		return history.ManifestV2{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return manifestV2{}, fmt.Errorf("manifest request failed: %s", resp.Status)
+		return history.ManifestV2{}, fmt.Errorf("manifest request failed: %s", resp.Status)
 	}
 
-	var manifest manifestV2
+	var manifest history.ManifestV2
 	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
-		return manifestV2{}, err
+		return history.ManifestV2{}, err
 	}
 	return manifest, nil
 }
 
-func (c *HTTPClient) getConfig(ctx context.Context, image, digest string) (configV2, error) {
+func (c *HTTPClient) getConfig(ctx context.Context, image, digest string) (history.ConfigV2, error) {
 	endpoint := c.resolve("/v2/"+image+"/blobs/"+digest, nil)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return configV2{}, err
+		return history.ConfigV2{}, err
 	}
 	if err := c.applyAuth(ctx, req); err != nil {
-		return configV2{}, err
+		return history.ConfigV2{}, err
 	}
 
 	resp, err := c.httpClient.Do(req)
 	c.logRequest(req, resp)
 	if err != nil {
-		return configV2{}, err
+		return history.ConfigV2{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return configV2{}, fmt.Errorf("config request failed: %s", resp.Status)
+		return history.ConfigV2{}, fmt.Errorf("config request failed: %s", resp.Status)
 	}
 
-	var cfg configV2
+	var cfg history.ConfigV2
 	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
-		return configV2{}, err
+		return history.ConfigV2{}, err
 	}
 	return cfg, nil
 }
 
 func (c *HTTPClient) resolve(path string, query url.Values) string {
-	resolved := *c.baseURL
-	resolved.Path = strings.TrimSuffix(resolved.Path, "/") + path
-	if query != nil {
-		resolved.RawQuery = query.Encode()
-	} else {
-		resolved.RawQuery = ""
-	}
-	return resolved.String()
+	return resolveURL(c.baseURL, path, query)
 }
 
 func (c *HTTPClient) applyAuth(ctx context.Context, req *http.Request) error {
@@ -267,19 +252,6 @@ func (c *HTTPClient) logRequest(req *http.Request, resp *http.Response) {
 		Headers: cloneHeader(req.Header),
 		Status:  status,
 	})
-}
-
-func cloneHeader(header http.Header) map[string][]string {
-	if len(header) == 0 {
-		return nil
-	}
-	out := make(map[string][]string, len(header))
-	for key, values := range header {
-		copied := make([]string, len(values))
-		copy(copied, values)
-		out[key] = copied
-	}
-	return out
 }
 
 func (c *HTTPClient) getRegistryV2Token(ctx context.Context) (string, error) {
@@ -365,38 +337,6 @@ func (c *HTTPClient) fetchRegistryV2Token(ctx context.Context) (string, time.Tim
 		return "", time.Time{}, "", errors.New("registry_v2 token response missing token")
 	}
 	return token, expiry, refresh, nil
-}
-
-type tokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	IDToken      string `json:"id_token"`
-	Token        string `json:"token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int64  `json:"expires_in"`
-	IssuedAt     string `json:"issued_at"`
-}
-
-func decodeTokenResponse(resp *http.Response) (string, string, time.Time, error) {
-	var payload tokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return "", "", time.Time{}, err
-	}
-	token := firstNonEmpty(payload.IDToken, payload.AccessToken, payload.Token)
-	refresh := payload.RefreshToken
-	expiry := time.Now().Add(time.Duration(payload.ExpiresIn) * time.Second)
-	if payload.ExpiresIn == 0 {
-		expiry = time.Now().Add(5 * time.Minute)
-	}
-	return token, refresh, expiry, nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func registryScope() string {

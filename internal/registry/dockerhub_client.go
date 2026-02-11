@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -204,26 +203,11 @@ func (c *DockerHubClient) listTagsPage(ctx context.Context, image, next string) 
 }
 
 func (c *DockerHubClient) resolveNext(next string) string {
-	if next == "" {
-		return ""
-	}
-	parsed, err := url.Parse(next)
-	if err != nil || parsed.Host != "" {
-		return next
-	}
-	resolved := *c.baseURL
-	resolved.Path = path.Join(strings.TrimSuffix(c.baseURL.Path, "/"), strings.TrimPrefix(parsed.Path, "/"))
-	resolved.RawQuery = parsed.RawQuery
-	return resolved.String()
+	return resolveNextURL(c.baseURL, next)
 }
 
 func (c *DockerHubClient) resolve(p string, query url.Values) string {
-	resolved := *c.baseURL
-	resolved.Path = strings.TrimSuffix(resolved.Path, "/") + p
-	if query != nil {
-		resolved.RawQuery = query.Encode()
-	}
-	return resolved.String()
+	return resolveURL(c.baseURL, p, query)
 }
 
 func (c *DockerHubClient) doJSON(ctx context.Context, method, endpoint string, body io.Reader, out interface{}) (DockerHubRateLimit, error) {

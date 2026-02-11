@@ -1,45 +1,57 @@
-package registry
+package history
 
 import (
 	"strings"
 	"time"
 )
 
-type manifestV2 struct {
-	MediaType string `json:"mediaType"`
-	Config    struct {
-		Digest string `json:"digest"`
-	} `json:"config"`
-	Layers []struct {
-		Size int64 `json:"size"`
-	} `json:"layers"`
-	Manifests []manifestDescriptor `json:"manifests"`
+type ManifestV2 struct {
+	MediaType string               `json:"mediaType"`
+	Config    ManifestConfig       `json:"config"`
+	Layers    []ManifestLayer      `json:"layers"`
+	Manifests []ManifestDescriptor `json:"manifests"`
 }
 
-type manifestDescriptor struct {
+type ManifestConfig struct {
+	Digest string `json:"digest"`
+}
+
+type ManifestLayer struct {
+	Size int64 `json:"size"`
+}
+
+type ManifestDescriptor struct {
 	MediaType string           `json:"mediaType"`
 	Digest    string           `json:"digest"`
-	Platform  manifestPlatform `json:"platform"`
+	Platform  ManifestPlatform `json:"platform"`
 }
 
-type manifestPlatform struct {
+type ManifestPlatform struct {
 	OS           string `json:"os"`
 	Architecture string `json:"architecture"`
 	Variant      string `json:"variant"`
 }
 
-type configV2 struct {
-	History []configHistory `json:"history"`
+type ConfigV2 struct {
+	History []ConfigHistory `json:"history"`
 }
 
-type configHistory struct {
+type ConfigHistory struct {
 	Created    string `json:"created"`
 	CreatedBy  string `json:"created_by"`
 	Comment    string `json:"comment"`
 	EmptyLayer bool   `json:"empty_layer"`
 }
 
-func buildHistory(manifest manifestV2, cfg configV2) []HistoryEntry {
+type Entry struct {
+	CreatedAt  time.Time
+	CreatedBy  string
+	Comment    string
+	SizeBytes  int64
+	EmptyLayer bool
+}
+
+func Build(manifest ManifestV2, cfg ConfigV2) []Entry {
 	if len(cfg.History) == 0 {
 		return nil
 	}
@@ -50,9 +62,9 @@ func buildHistory(manifest manifestV2, cfg configV2) []HistoryEntry {
 	}
 
 	layerIndex := 0
-	entries := make([]HistoryEntry, 0, len(cfg.History))
+	entries := make([]Entry, 0, len(cfg.History))
 	for _, entry := range cfg.History {
-		h := HistoryEntry{
+		h := Entry{
 			CreatedAt:  parseDockerTime(entry.Created),
 			CreatedBy:  strings.TrimSpace(entry.CreatedBy),
 			Comment:    strings.TrimSpace(entry.Comment),
@@ -75,20 +87,7 @@ func buildHistory(manifest manifestV2, cfg configV2) []HistoryEntry {
 	return entries
 }
 
-func parseDockerTime(value string) time.Time {
-	if value == "" {
-		return time.Time{}
-	}
-	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
-		return parsed
-	}
-	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
-		return parsed
-	}
-	return time.Time{}
-}
-
-func preferredManifestDigest(manifest manifestV2) string {
+func PreferredManifestDigest(manifest ManifestV2) string {
 	if len(manifest.Manifests) == 0 {
 		return ""
 	}
@@ -130,4 +129,17 @@ func preferredManifestDigest(manifest manifestV2) string {
 		return ""
 	}
 	return strings.TrimSpace(manifest.Manifests[bestIdx].Digest)
+}
+
+func parseDockerTime(value string) time.Time {
+	if value == "" {
+		return time.Time{}
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return parsed
+	}
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return parsed
+	}
+	return time.Time{}
 }

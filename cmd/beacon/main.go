@@ -9,7 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/scottbass3/beacon/internal/config"
+	"github.com/scottbass3/beacon/internal/contextstore"
 	"github.com/scottbass3/beacon/internal/registry"
 	"github.com/scottbass3/beacon/internal/tui"
 )
@@ -49,18 +49,14 @@ func main() {
 }
 
 func resolveRegistry(registryHost, configPath string) (registry.Auth, string, []tui.ContextOption, string, string, error) {
-	path := configPath
-	if path == "" {
-		path = config.DefaultPath()
-	}
-
-	cfg, err := config.Ensure(path)
+	store := contextstore.New(configPath)
+	contextConfigs, err := store.Ensure()
 	if err != nil {
-		return registry.Auth{}, "", nil, "", path, err
+		return registry.Auth{}, "", nil, "", store.Path(), err
 	}
 
-	contexts := make([]tui.ContextOption, 0, len(cfg.Contexts))
-	for _, ctx := range cfg.Contexts {
+	contexts := make([]tui.ContextOption, 0, len(contextConfigs))
+	for _, ctx := range contextConfigs {
 		contexts = append(contexts, toContextOption(ctx))
 	}
 
@@ -70,32 +66,24 @@ func resolveRegistry(registryHost, configPath string) (registry.Auth, string, []
 			RegistryV2: registry.RegistryV2Auth{
 				Anonymous: true,
 			},
-		}, registryHost, contexts, "", path, nil
+		}, registryHost, contexts, "", store.Path(), nil
 	}
 
-	if len(cfg.Contexts) == 0 {
-		return registry.Auth{}, "", contexts, "", path, nil
+	if len(contextConfigs) == 0 {
+		return registry.Auth{}, "", contexts, "", store.Path(), nil
 	}
 
-	ctx := cfg.Contexts[0]
+	ctx := contextConfigs[0]
 	current := ctx.Name
-	return toContextOption(ctx).Auth, ctx.Registry, contexts, current, path, nil
+	return toContextOption(ctx).Auth, ctx.Host, contexts, current, store.Path(), nil
 }
 
-func toContextOption(ctx config.Context) tui.ContextOption {
-	auth := registry.Auth{Kind: ctx.Kind}
-	switch strings.ToLower(ctx.Kind) {
-	case "registry_v2", "registry", "v2":
-		auth.RegistryV2.Anonymous = ctx.Anonymous
-		auth.RegistryV2.Service = ctx.Service
-	case "harbor":
-		auth.Harbor.Anonymous = ctx.Anonymous
-		auth.Harbor.Service = ctx.Service
-	}
-
+func toContextOption(ctx contextstore.Context) tui.ContextOption {
+	auth := ctx.Auth
+	auth.Normalize()
 	return tui.ContextOption{
 		Name: ctx.Name,
-		Host: ctx.Registry,
+		Host: ctx.Host,
 		Auth: auth,
 	}
 }

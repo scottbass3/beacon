@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/scottbass3/beacon/internal/registry/history"
 )
 
 const harborPageSize = 100
@@ -144,19 +146,7 @@ func (c *HarborClient) ListTagHistory(ctx context.Context, image, tag string) ([
 	if image == "" || tag == "" {
 		return nil, nil
 	}
-
-	manifest, err := c.getManifest(ctx, image, tag)
-	if err != nil {
-		return nil, err
-	}
-	if manifest.Config.Digest == "" {
-		return nil, nil
-	}
-	cfg, err := c.getConfig(ctx, image, manifest.Config.Digest)
-	if err != nil {
-		return nil, err
-	}
-	return buildHistory(manifest, cfg), nil
+	return listTagHistoryFromManifest(ctx, "harbor", image, tag, c.getManifest, c.getConfig)
 }
 
 func (c *HarborClient) DeleteTag(ctx context.Context, image, tag string) error {
@@ -168,14 +158,7 @@ func (c *HarborClient) RenameTag(ctx context.Context, image, from, to string) er
 }
 
 func (c *HarborClient) resolve(path string, query url.Values) string {
-	resolved := *c.baseURL
-	resolved.Path = strings.TrimSuffix(resolved.Path, "/") + path
-	if query != nil {
-		resolved.RawQuery = query.Encode()
-	} else {
-		resolved.RawQuery = ""
-	}
-	return resolved.String()
+	return resolveURL(c.baseURL, path, query)
 }
 
 func (c *HarborClient) doJSON(ctx context.Context, method, endpoint string, body io.Reader, out interface{}) error {
@@ -204,15 +187,17 @@ func (c *HarborClient) doJSON(ctx context.Context, method, endpoint string, body
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-func (c *HarborClient) getManifest(ctx context.Context, image, reference string) (manifestV2, error) {
+func (c *HarborClient) getManifest(ctx context.Context, image, reference string) (history.ManifestV2, error) {
 	endpoint := c.resolve("/v2/"+image+"/manifests/"+reference, nil)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return manifestV2{}, err
+		return history.ManifestV2{}, err
 	}
 	req.Header.Set("Accept", strings.Join([]string{
 		"application/vnd.docker.distribution.manifest.v2+json",
 		"application/vnd.oci.image.manifest.v1+json",
+		"application/vnd.docker.distribution.manifest.list.v2+json",
+		"application/vnd.oci.image.index.v1+json",
 	}, ", "))
 	if !c.auth.Harbor.Anonymous {
 		req.SetBasicAuth(c.auth.Harbor.Username, c.auth.Harbor.Password)
@@ -221,26 +206,26 @@ func (c *HarborClient) getManifest(ctx context.Context, image, reference string)
 	resp, err := c.httpClient.Do(req)
 	c.logRequest(req, resp)
 	if err != nil {
-		return manifestV2{}, err
+		return history.ManifestV2{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return manifestV2{}, fmt.Errorf("harbor manifest request failed: %s", resp.Status)
+		return history.ManifestV2{}, fmt.Errorf("harbor manifest request failed: %s", resp.Status)
 	}
 
-	var manifest manifestV2
+	var manifest history.ManifestV2
 	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
-		return manifestV2{}, err
+		return history.ManifestV2{}, err
 	}
 	return manifest, nil
 }
 
-func (c *HarborClient) getConfig(ctx context.Context, image, digest string) (configV2, error) {
+func (c *HarborClient) getConfig(ctx context.Context, image, digest string) (history.ConfigV2, error) {
 	endpoint := c.resolve("/v2/"+image+"/blobs/"+digest, nil)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return configV2{}, err
+		return history.ConfigV2{}, err
 	}
 	if !c.auth.Harbor.Anonymous {
 		req.SetBasicAuth(c.auth.Harbor.Username, c.auth.Harbor.Password)
@@ -249,17 +234,17 @@ func (c *HarborClient) getConfig(ctx context.Context, image, digest string) (con
 	resp, err := c.httpClient.Do(req)
 	c.logRequest(req, resp)
 	if err != nil {
-		return configV2{}, err
+		return history.ConfigV2{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return configV2{}, fmt.Errorf("harbor config request failed: %s", resp.Status)
+		return history.ConfigV2{}, fmt.Errorf("harbor config request failed: %s", resp.Status)
 	}
 
-	var cfg configV2
+	var cfg history.ConfigV2
 	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
-		return configV2{}, err
+		return history.ConfigV2{}, err
 	}
 	return cfg, nil
 }
