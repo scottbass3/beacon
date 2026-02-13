@@ -110,7 +110,7 @@ func (m *Model) openDockerHubTagHistory() tea.Cmd {
 }
 
 func (m *Model) maybeLoadDockerHubOnBottom(msg tea.KeyMsg) tea.Cmd {
-	return m.maybeLoadExternalOnBottom(externalModeDockerHub, msg)
+	return m.maybeLoadExternalOnBottomKey(externalModeDockerHub, msg)
 }
 
 func (m *Model) maybeLoadDockerHubForFilter() tea.Cmd {
@@ -176,7 +176,7 @@ func (m *Model) openGitHubTagHistory() tea.Cmd {
 }
 
 func (m *Model) maybeLoadGitHubOnBottom(msg tea.KeyMsg) tea.Cmd {
-	return m.maybeLoadExternalOnBottom(externalModeGitHub, msg)
+	return m.maybeLoadExternalOnBottomKey(externalModeGitHub, msg)
 }
 
 func (m *Model) maybeLoadGitHubForFilter() tea.Cmd {

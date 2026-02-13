@@ -48,10 +48,11 @@ func (m *Model) syncTable() {
 	m.table.SetStyles(tableStyles())
 	cursor := m.table.Cursor()
 	if len(list.rows) == 0 {
-		m.table.SetCursor(0)
+		m.tableSetCursor(0)
 	} else if cursor >= len(list.rows) {
-		m.table.SetCursor(len(list.rows) - 1)
+		m.tableSetCursor(len(list.rows) - 1)
 	}
+	m.reconcileTableViewportState()
 }
 
 func (m Model) tableHeight() int {

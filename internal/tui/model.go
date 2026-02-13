@@ -185,6 +185,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		return m.updateKeyMsg(msg)
+	case tea.MouseMsg:
+		return m.updateMouseMsg(msg)
 	case tea.WindowSizeMsg:
 		return m.updateWindowSizeMsg(msg)
 	case imagesMsg:

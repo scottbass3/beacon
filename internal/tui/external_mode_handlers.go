@@ -27,7 +27,7 @@ func (m Model) handleExternalKey(kind externalModeKind, msg tea.KeyMsg) (tea.Mod
 		var cmd tea.Cmd
 		m.filterInput, cmd = m.filterInput.Update(msg)
 		if m.filterInput.Value() != before {
-			m.table.SetCursor(0)
+			m.tableSetCursor(0)
 			m.syncTable()
 			return m, tea.Batch(cmd, m.maybeLoadExternalForFilter(kind))
 		}
@@ -84,7 +84,7 @@ func (m Model) handleExternalKey(kind externalModeKind, msg tea.KeyMsg) (tea.Mod
 		return m, m.refreshExternal(kind)
 	}
 	if m.handleTableNavKey(msg) {
-		return m, m.maybeLoadExternalOnBottom(kind, msg)
+		return m, m.maybeLoadExternalOnBottomKey(kind, msg)
 	}
 
 	if len(msg.Runes) > 0 || msg.String() == "backspace" || msg.String() == "delete" {
@@ -95,6 +95,21 @@ func (m Model) handleExternalKey(kind externalModeKind, msg tea.KeyMsg) (tea.Mod
 		return m, m.updateExternalInput(kind, msg)
 	}
 
+	return m, nil
+}
+
+func (m Model) handleExternalMouse(kind externalModeKind, msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.handleTableMouse(msg) {
+		if m.externalInputFocused(kind) {
+			m.setExternalInputFocus(kind, false)
+			m.blurExternalInput(kind)
+			m.table.Focus()
+		}
+		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelDown {
+			return m, m.maybeLoadExternalOnBottom(kind)
+		}
+		return m, nil
+	}
 	return m, nil
 }
 
@@ -226,7 +241,7 @@ func (m *Model) openExternalTagHistory(kind externalModeKind) tea.Cmd {
 	}
 }
 
-func (m *Model) maybeLoadExternalOnBottom(kind externalModeKind, msg tea.KeyMsg) tea.Cmd {
+func (m *Model) maybeLoadExternalOnBottomKey(kind externalModeKind, msg tea.KeyMsg) tea.Cmd {
 	switch {
 	case isShortcut(msg, shortcutMoveDown),
 		isShortcut(msg, shortcutMovePageDown),
@@ -235,6 +250,10 @@ func (m *Model) maybeLoadExternalOnBottom(kind externalModeKind, msg tea.KeyMsg)
 	default:
 		return nil
 	}
+	return m.maybeLoadExternalOnBottom(kind)
+}
+
+func (m *Model) maybeLoadExternalOnBottom(kind externalModeKind) tea.Cmd {
 	if m.focus != kind.focus() {
 		return nil
 	}

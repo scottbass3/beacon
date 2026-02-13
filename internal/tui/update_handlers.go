@@ -48,6 +48,24 @@ func (m Model) updateKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m.handleKey(msg)
 }
 
+func (m Model) updateMouseMsg(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.helpActive ||
+		m.commandActive ||
+		m.isConfirmModalActive() ||
+		m.isContextFormActive() ||
+		m.isContextSelectionActive() ||
+		m.isAuthModalActive() {
+		return m, nil
+	}
+	if m.dockerHubActive {
+		return m.handleExternalMouse(externalModeDockerHub, msg)
+	}
+	if m.githubActive {
+		return m.handleExternalMouse(externalModeGitHub, msg)
+	}
+	return m.handleMouse(msg)
+}
+
 func (m Model) updateWindowSizeMsg(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.width = msg.Width
 	m.height = msg.Height

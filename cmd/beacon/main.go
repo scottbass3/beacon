@@ -41,6 +41,7 @@ func main() {
 	program := tea.NewProgram(
 		tui.NewModel(host, auth, logger, debug, logCh, contexts, currentContext, resolvedConfigPath),
 		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
 	)
 	if err := program.Start(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

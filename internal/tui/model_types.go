@@ -105,6 +105,7 @@ type Model struct {
 	contexts         []ContextOption
 	contextNameIndex map[string]int
 	tableColumns     []table.Column
+	tableYOffset     int
 
 	debug  bool
 	logCh  <-chan string

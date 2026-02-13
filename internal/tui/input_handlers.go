@@ -22,7 +22,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.filterInput, cmd = m.filterInput.Update(msg)
 		if m.filterInput.Value() != before {
-			m.table.SetCursor(0)
+			m.tableSetCursor(0)
 			m.syncTable()
 		}
 		return m, cmd
@@ -60,6 +60,39 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.handleTableMouse(msg) {
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m *Model) handleTableMouse(msg tea.MouseMsg) bool {
+	switch {
+	case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelUp:
+		if _, ok := m.tableRowAtMouse(msg); !ok {
+			return false
+		}
+		m.tableMoveUp(1)
+		return true
+	case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelDown:
+		if _, ok := m.tableRowAtMouse(msg); !ok {
+			return false
+		}
+		m.tableMoveDown(1)
+		return true
+	case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft:
+		row, ok := m.tableRowAtMouse(msg)
+		if !ok {
+			return false
+		}
+		m.tableSetCursor(row)
+		return true
+	default:
+		return false
+	}
+}
+
 func (m Model) handleDockerHubKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m.handleExternalKey(externalModeDockerHub, msg)
 }
@@ -77,28 +110,28 @@ func (m *Model) handleTableNavKey(msg tea.KeyMsg) bool {
 
 	switch {
 	case isShortcut(msg, shortcutMoveUp):
-		m.table.MoveUp(1)
+		m.tableMoveUp(1)
 		return true
 	case isShortcut(msg, shortcutMoveDown):
-		m.table.MoveDown(1)
+		m.tableMoveDown(1)
 		return true
 	case isShortcut(msg, shortcutMovePageUp):
-		m.table.MoveUp(step)
+		m.tableMoveUp(step)
 		return true
 	case isShortcut(msg, shortcutMovePageDown):
-		m.table.MoveDown(step)
+		m.tableMoveDown(step)
 		return true
 	case isShortcut(msg, shortcutMoveHalfUp):
-		m.table.MoveUp(maxInt(1, step/2))
+		m.tableMoveUp(maxInt(1, step/2))
 		return true
 	case isShortcut(msg, shortcutMoveHalfDown):
-		m.table.MoveDown(maxInt(1, step/2))
+		m.tableMoveDown(maxInt(1, step/2))
 		return true
 	case isShortcut(msg, shortcutMoveTop):
-		m.table.GotoTop()
+		m.tableGotoTop()
 		return true
 	case isShortcut(msg, shortcutMoveBottom):
-		m.table.GotoBottom()
+		m.tableGotoBottom()
 		return true
 	default:
 		return false

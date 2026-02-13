@@ -96,6 +96,7 @@ Core keys:
 - `r`: refresh current view
 - `c`: copy selected `image:tag` (when browsing tags)
 - `p`: pull selected `image:tag` with Docker (when browsing tags)
+- Mouse: click a row to select it, use scroll wheel to move up/down in tables
 - `?` or `F1`: help
 
 ## Debug logging
