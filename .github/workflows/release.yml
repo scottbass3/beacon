@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  verify-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate semantic version tag
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Tag '${tag}' is not a valid semantic version. Expected format: vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+
+      - name: Ensure tagged commit is on main
+        run: |
+          git fetch origin main --depth=1
+          if ! git branch -r --contains "${GITHUB_SHA}" | grep -q "origin/main"; then
+            echo "Tag '${GITHUB_REF_NAME}' does not point to a commit on main."
+            exit 1
+          fi
+
+  build:
+    runs-on: ubuntu-latest
+    needs: verify-tag
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build archive
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+
+          binary_name="beacon"
+          if [[ "${GOOS}" == "windows" ]]; then
+            binary_name="${binary_name}.exe"
+          fi
+
+          artifact_dir="beacon_${GITHUB_REF_NAME}_${GOOS}_${GOARCH}"
+          mkdir -p "dist/${artifact_dir}"
+
+          CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" \
+            go build -trimpath -ldflags="-s -w" -o "dist/${artifact_dir}/${binary_name}" ./cmd/beacon
+
+          tar -czf "dist/${artifact_dir}.tar.gz" -C dist "${artifact_dir}"
+          rm -rf "dist/${artifact_dir}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: beacon-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.tar.gz
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: beacon-*
+          merge-multiple: true
+          path: dist
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum *.tar.gz > checksums.txt
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/checksums.txt
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
