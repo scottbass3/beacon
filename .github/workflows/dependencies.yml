@@ -1,4 +1,4 @@
-name: Dependencies
+name: Dependencies Up-to-Date
 
 on:
   push:
@@ -30,3 +30,13 @@ jobs:
         run: |
           go mod tidy
           git diff --exit-code -- go.mod go.sum
+
+      - name: Fail if any dependency updates are available
+        run: |
+          set -euo pipefail
+          outdated="$(go list -mod=readonly -u -m all | awk 'index($0, "[") > 0')"
+          if [ -n "${outdated}" ]; then
+            echo "Dependencies are not up to date. Available updates:"
+            echo "${outdated}"
+            exit 1
+          fi
