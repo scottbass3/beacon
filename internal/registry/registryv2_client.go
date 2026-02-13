@@ -11,8 +11,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/scottbass3/beacon/internal/registry/history"
 )
 
 const defaultCatalogPageSize = 1000
@@ -157,11 +155,11 @@ func (c *HTTPClient) listTags(ctx context.Context, repository string) ([]Tag, er
 	return tags, nil
 }
 
-func (c *HTTPClient) getManifest(ctx context.Context, image, reference string) (history.ManifestV2, error) {
+func (c *HTTPClient) getManifest(ctx context.Context, image, reference string) (ManifestV2, error) {
 	endpoint := c.resolve("/v2/"+image+"/manifests/"+reference, nil)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return history.ManifestV2{}, err
+		return ManifestV2{}, err
 	}
 	req.Header.Set("Accept", strings.Join([]string{
 		"application/vnd.docker.distribution.manifest.v2+json",
@@ -170,51 +168,51 @@ func (c *HTTPClient) getManifest(ctx context.Context, image, reference string) (
 		"application/vnd.oci.image.index.v1+json",
 	}, ", "))
 	if err := c.applyAuth(ctx, req); err != nil {
-		return history.ManifestV2{}, err
+		return ManifestV2{}, err
 	}
 
 	resp, err := c.httpClient.Do(req)
 	c.logRequest(req, resp)
 	if err != nil {
-		return history.ManifestV2{}, err
+		return ManifestV2{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return history.ManifestV2{}, fmt.Errorf("manifest request failed: %s", resp.Status)
+		return ManifestV2{}, fmt.Errorf("manifest request failed: %s", resp.Status)
 	}
 
-	var manifest history.ManifestV2
+	var manifest ManifestV2
 	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
-		return history.ManifestV2{}, err
+		return ManifestV2{}, err
 	}
 	return manifest, nil
 }
 
-func (c *HTTPClient) getConfig(ctx context.Context, image, digest string) (history.ConfigV2, error) {
+func (c *HTTPClient) getConfig(ctx context.Context, image, digest string) (ConfigV2, error) {
 	endpoint := c.resolve("/v2/"+image+"/blobs/"+digest, nil)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return history.ConfigV2{}, err
+		return ConfigV2{}, err
 	}
 	if err := c.applyAuth(ctx, req); err != nil {
-		return history.ConfigV2{}, err
+		return ConfigV2{}, err
 	}
 
 	resp, err := c.httpClient.Do(req)
 	c.logRequest(req, resp)
 	if err != nil {
-		return history.ConfigV2{}, err
+		return ConfigV2{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return history.ConfigV2{}, fmt.Errorf("config request failed: %s", resp.Status)
+		return ConfigV2{}, fmt.Errorf("config request failed: %s", resp.Status)
 	}
 
-	var cfg history.ConfigV2
+	var cfg ConfigV2
 	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
-		return history.ConfigV2{}, err
+		return ConfigV2{}, err
 	}
 	return cfg, nil
 }

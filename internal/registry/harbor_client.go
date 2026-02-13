@@ -10,8 +10,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/scottbass3/beacon/internal/registry/history"
 )
 
 const harborPageSize = 100
@@ -187,11 +185,11 @@ func (c *HarborClient) doJSON(ctx context.Context, method, endpoint string, body
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-func (c *HarborClient) getManifest(ctx context.Context, image, reference string) (history.ManifestV2, error) {
+func (c *HarborClient) getManifest(ctx context.Context, image, reference string) (ManifestV2, error) {
 	endpoint := c.resolve("/v2/"+image+"/manifests/"+reference, nil)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return history.ManifestV2{}, err
+		return ManifestV2{}, err
 	}
 	req.Header.Set("Accept", strings.Join([]string{
 		"application/vnd.docker.distribution.manifest.v2+json",
@@ -206,26 +204,26 @@ func (c *HarborClient) getManifest(ctx context.Context, image, reference string)
 	resp, err := c.httpClient.Do(req)
 	c.logRequest(req, resp)
 	if err != nil {
-		return history.ManifestV2{}, err
+		return ManifestV2{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return history.ManifestV2{}, fmt.Errorf("harbor manifest request failed: %s", resp.Status)
+		return ManifestV2{}, fmt.Errorf("harbor manifest request failed: %s", resp.Status)
 	}
 
-	var manifest history.ManifestV2
+	var manifest ManifestV2
 	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
-		return history.ManifestV2{}, err
+		return ManifestV2{}, err
 	}
 	return manifest, nil
 }
 
-func (c *HarborClient) getConfig(ctx context.Context, image, digest string) (history.ConfigV2, error) {
+func (c *HarborClient) getConfig(ctx context.Context, image, digest string) (ConfigV2, error) {
 	endpoint := c.resolve("/v2/"+image+"/blobs/"+digest, nil)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return history.ConfigV2{}, err
+		return ConfigV2{}, err
 	}
 	if !c.auth.Harbor.Anonymous {
 		req.SetBasicAuth(c.auth.Harbor.Username, c.auth.Harbor.Password)
@@ -234,17 +232,17 @@ func (c *HarborClient) getConfig(ctx context.Context, image, digest string) (his
 	resp, err := c.httpClient.Do(req)
 	c.logRequest(req, resp)
 	if err != nil {
-		return history.ConfigV2{}, err
+		return ConfigV2{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return history.ConfigV2{}, fmt.Errorf("harbor config request failed: %s", resp.Status)
+		return ConfigV2{}, fmt.Errorf("harbor config request failed: %s", resp.Status)
 	}
 
-	var cfg history.ConfigV2
+	var cfg ConfigV2
 	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
-		return history.ConfigV2{}, err
+		return ConfigV2{}, err
 	}
 	return cfg, nil
 }

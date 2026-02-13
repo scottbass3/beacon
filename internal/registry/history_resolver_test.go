@@ -3,21 +3,19 @@ package registry
 import (
 	"context"
 	"testing"
-
-	"github.com/scottbass3/beacon/internal/registry/history"
 )
 
 func TestListTagHistoryFromManifest_ResolvesManifestList(t *testing.T) {
 	calls := make([]string, 0, 2)
 
-	getManifest := func(_ context.Context, _ string, reference string) (history.ManifestV2, error) {
+	getManifest := func(_ context.Context, _ string, reference string) (ManifestV2, error) {
 		calls = append(calls, reference)
 		if reference == "latest" {
-			return history.ManifestV2{
-				Manifests: []history.ManifestDescriptor{
+			return ManifestV2{
+				Manifests: []ManifestDescriptor{
 					{
 						Digest: "sha256:child",
-						Platform: history.ManifestPlatform{
+						Platform: ManifestPlatform{
 							OS:           "linux",
 							Architecture: "amd64",
 						},
@@ -25,15 +23,15 @@ func TestListTagHistoryFromManifest_ResolvesManifestList(t *testing.T) {
 				},
 			}, nil
 		}
-		manifest := history.ManifestV2{}
+		manifest := ManifestV2{}
 		manifest.Config.Digest = "sha256:cfg"
-		manifest.Layers = []history.ManifestLayer{{Size: 42}}
+		manifest.Layers = []ManifestLayer{{Size: 42}}
 		return manifest, nil
 	}
 
-	getConfig := func(_ context.Context, _ string, _ string) (history.ConfigV2, error) {
-		return history.ConfigV2{
-			History: []history.ConfigHistory{{CreatedBy: "RUN echo ok", EmptyLayer: false}},
+	getConfig := func(_ context.Context, _ string, _ string) (ConfigV2, error) {
+		return ConfigV2{
+			History: []ConfigHistory{{CreatedBy: "RUN echo ok", EmptyLayer: false}},
 		}, nil
 	}
 
@@ -50,11 +48,11 @@ func TestListTagHistoryFromManifest_ResolvesManifestList(t *testing.T) {
 }
 
 func TestListTagHistoryFromManifest_MissingConfigDigest(t *testing.T) {
-	getManifest := func(_ context.Context, _ string, _ string) (history.ManifestV2, error) {
-		return history.ManifestV2{}, nil
+	getManifest := func(_ context.Context, _ string, _ string) (ManifestV2, error) {
+		return ManifestV2{}, nil
 	}
-	getConfig := func(_ context.Context, _ string, _ string) (history.ConfigV2, error) {
-		return history.ConfigV2{}, nil
+	getConfig := func(_ context.Context, _ string, _ string) (ConfigV2, error) {
+		return ConfigV2{}, nil
 	}
 
 	_, err := listTagHistoryFromManifest(context.Background(), "github", "owner/image", "latest", getManifest, getConfig)

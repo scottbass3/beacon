@@ -10,8 +10,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/scottbass3/beacon/internal/registry/history"
 )
 
 const githubContainerBaseURL = "https://ghcr.io"
@@ -185,11 +183,11 @@ func (c *GitHubContainerClient) doWithAuth(ctx context.Context, req *http.Reques
 	return retryResp, nil
 }
 
-func (c *GitHubContainerClient) getManifest(ctx context.Context, image, reference string) (history.ManifestV2, error) {
+func (c *GitHubContainerClient) getManifest(ctx context.Context, image, reference string) (ManifestV2, error) {
 	endpoint := c.resolve("/v2/"+image+"/manifests/"+url.PathEscape(reference), nil)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return history.ManifestV2{}, err
+		return ManifestV2{}, err
 	}
 	req.Header.Set("Accept", strings.Join([]string{
 		"application/vnd.docker.distribution.manifest.v2+json",
@@ -200,41 +198,41 @@ func (c *GitHubContainerClient) getManifest(ctx context.Context, image, referenc
 
 	resp, err := c.doWithAuth(ctx, req, image)
 	if err != nil {
-		return history.ManifestV2{}, err
+		return ManifestV2{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return history.ManifestV2{}, fmt.Errorf("github manifest request failed: %s", resp.Status)
+		return ManifestV2{}, fmt.Errorf("github manifest request failed: %s", resp.Status)
 	}
 
-	var manifest history.ManifestV2
+	var manifest ManifestV2
 	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
-		return history.ManifestV2{}, err
+		return ManifestV2{}, err
 	}
 	return manifest, nil
 }
 
-func (c *GitHubContainerClient) getConfig(ctx context.Context, image, digest string) (history.ConfigV2, error) {
+func (c *GitHubContainerClient) getConfig(ctx context.Context, image, digest string) (ConfigV2, error) {
 	endpoint := c.resolve("/v2/"+image+"/blobs/"+url.PathEscape(digest), nil)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return history.ConfigV2{}, err
+		return ConfigV2{}, err
 	}
 
 	resp, err := c.doWithAuth(ctx, req, image)
 	if err != nil {
-		return history.ConfigV2{}, err
+		return ConfigV2{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return history.ConfigV2{}, fmt.Errorf("github config request failed: %s", resp.Status)
+		return ConfigV2{}, fmt.Errorf("github config request failed: %s", resp.Status)
 	}
 
-	var cfg history.ConfigV2
+	var cfg ConfigV2
 	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
-		return history.ConfigV2{}, err
+		return ConfigV2{}, err
 	}
 	return cfg, nil
 }

@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-
-	"github.com/scottbass3/beacon/internal/registry/history"
 )
 
 func listTagHistoryFromManifest(
@@ -13,15 +11,15 @@ func listTagHistoryFromManifest(
 	provider string,
 	image string,
 	tag string,
-	getManifest func(context.Context, string, string) (history.ManifestV2, error),
-	getConfig func(context.Context, string, string) (history.ConfigV2, error),
+	getManifest func(context.Context, string, string) (ManifestV2, error),
+	getConfig func(context.Context, string, string) (ConfigV2, error),
 ) ([]HistoryEntry, error) {
 	manifest, err := getManifest(ctx, image, tag)
 	if err != nil {
 		return nil, err
 	}
 	if manifest.Config.Digest == "" {
-		resolvedDigest := history.PreferredManifestDigest(manifest)
+		resolvedDigest := PreferredManifestDigest(manifest)
 		if resolvedDigest != "" {
 			manifest, err = getManifest(ctx, image, resolvedDigest)
 			if err != nil {
@@ -36,10 +34,10 @@ func listTagHistoryFromManifest(
 	if err != nil {
 		return nil, err
 	}
-	return toHistoryEntries(history.Build(manifest, cfg)), nil
+	return toHistoryEntries(Build(manifest, cfg)), nil
 }
 
-func toHistoryEntries(entries []history.Entry) []HistoryEntry {
+func toHistoryEntries(entries []Entry) []HistoryEntry {
 	if len(entries) == 0 {
 		return nil
 	}

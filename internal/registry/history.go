@@ -1,4 +1,4 @@
-package history
+package registry
 
 import (
 	"strings"

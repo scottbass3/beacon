@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-
-	"github.com/scottbass3/beacon/internal/registry/history"
 )
 
 const dockerHubRegistryBaseURL = "https://registry-1.docker.io"
@@ -25,11 +23,11 @@ func (c *DockerHubClient) ListTagHistory(ctx context.Context, image, tag string)
 	return listTagHistoryFromManifest(ctx, "docker hub", image, tag, c.getRegistryManifest, c.getRegistryConfig)
 }
 
-func (c *DockerHubClient) getRegistryManifest(ctx context.Context, image, reference string) (history.ManifestV2, error) {
+func (c *DockerHubClient) getRegistryManifest(ctx context.Context, image, reference string) (ManifestV2, error) {
 	endpoint := fmt.Sprintf("%s/v2/%s/manifests/%s", dockerHubRegistryBaseURL, image, url.PathEscape(reference))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return history.ManifestV2{}, err
+		return ManifestV2{}, err
 	}
 	req.Header.Set("Accept", strings.Join([]string{
 		"application/vnd.docker.distribution.manifest.v2+json",
@@ -40,41 +38,41 @@ func (c *DockerHubClient) getRegistryManifest(ctx context.Context, image, refere
 
 	resp, err := c.doRegistryRequest(ctx, req, image)
 	if err != nil {
-		return history.ManifestV2{}, err
+		return ManifestV2{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return history.ManifestV2{}, fmt.Errorf("docker hub manifest request failed: %s", resp.Status)
+		return ManifestV2{}, fmt.Errorf("docker hub manifest request failed: %s", resp.Status)
 	}
 
-	var manifest history.ManifestV2
+	var manifest ManifestV2
 	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
-		return history.ManifestV2{}, err
+		return ManifestV2{}, err
 	}
 	return manifest, nil
 }
 
-func (c *DockerHubClient) getRegistryConfig(ctx context.Context, image, digest string) (history.ConfigV2, error) {
+func (c *DockerHubClient) getRegistryConfig(ctx context.Context, image, digest string) (ConfigV2, error) {
 	endpoint := fmt.Sprintf("%s/v2/%s/blobs/%s", dockerHubRegistryBaseURL, image, url.PathEscape(digest))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return history.ConfigV2{}, err
+		return ConfigV2{}, err
 	}
 
 	resp, err := c.doRegistryRequest(ctx, req, image)
 	if err != nil {
-		return history.ConfigV2{}, err
+		return ConfigV2{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return history.ConfigV2{}, fmt.Errorf("docker hub config request failed: %s", resp.Status)
+		return ConfigV2{}, fmt.Errorf("docker hub config request failed: %s", resp.Status)
 	}
 
-	var cfg history.ConfigV2
+	var cfg ConfigV2
 	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
-		return history.ConfigV2{}, err
+		return ConfigV2{}, err
 	}
 	return cfg, nil
 }
