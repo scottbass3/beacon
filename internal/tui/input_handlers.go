@@ -36,6 +36,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case isShortcut(msg, shortcutCopyImageTag):
 		m.copySelectedTagReference()
 		return m, nil
+	case isShortcut(msg, shortcutPullImageTag):
+		return m, m.pullSelectedTagWithDocker()
 	case isShortcut(msg, shortcutOpenFilter):
 		m.filterActive = true
 		m.filterInput.Focus()

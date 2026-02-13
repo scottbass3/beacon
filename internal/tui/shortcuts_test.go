@@ -22,6 +22,7 @@ func TestCurrentPageHelpEntriesArePageScoped(t *testing.T) {
 			wantIn: []string{
 				"Open selected tag history",
 				"Copy selected image:tag",
+				"Pull selected image:tag with docker",
 			},
 			wantAbsent: []string{
 				"Focus search input",
@@ -100,6 +101,7 @@ func TestRenderShortcutHintLineUsesCurrentPage(t *testing.T) {
 			wantIn: []string{
 				"Shortcuts:",
 				"c copy",
+				"p pull",
 				"esc back",
 			},
 			wantAbsent: []string{
@@ -115,6 +117,7 @@ func TestRenderShortcutHintLineUsesCurrentPage(t *testing.T) {
 			wantIn: []string{
 				"s search",
 				"c copy",
+				"p pull",
 				"esc exit",
 			},
 		},

@@ -173,6 +173,16 @@ func (m Model) updateHistoryMsg(msg historyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) updateDockerPullMsg(msg dockerPullMsg) (tea.Model, tea.Cmd) {
+	m.stopLoading()
+	if msg.err != nil {
+		m.status = fmt.Sprintf("Failed to pull %s: %v", msg.reference, msg.err)
+		return m, nil
+	}
+	m.status = fmt.Sprintf("Pulled %s", msg.reference)
+	return m, nil
+}
+
 func (m Model) updateDockerHubTagsMsg(msg dockerHubTagsMsg) (tea.Model, tea.Cmd) {
 	m.stopLoading()
 	m.dockerHubLoading = false

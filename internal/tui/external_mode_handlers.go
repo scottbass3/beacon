@@ -62,6 +62,8 @@ func (m Model) handleExternalKey(kind externalModeKind, msg tea.KeyMsg) (tea.Mod
 	case isShortcut(msg, shortcutCopyImageTag):
 		m.copySelectedTagReference()
 		return m, nil
+	case isShortcut(msg, shortcutPullImageTag):
+		return m, m.pullSelectedTagWithDocker()
 	case isShortcut(msg, shortcutOpenCommand):
 		return m.enterCommandMode()
 	case isShortcut(msg, shortcutOpenExternalTagHistory):

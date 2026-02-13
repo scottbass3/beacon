@@ -19,6 +19,7 @@ const (
 	shortcutExitExternalMode
 	shortcutFocusExternalSearch
 	shortcutCopyImageTag
+	shortcutPullImageTag
 
 	shortcutOpenProjectImages
 	shortcutOpenImageTags
@@ -130,6 +131,13 @@ var shortcutDefinitions = map[shortcutAction]shortcutDefinition{
 		HintKeys:    "c",
 		Description: "Copy selected image:tag",
 		HintLabel:   "copy",
+	},
+	shortcutPullImageTag: {
+		Keys:        []string{"p"},
+		HelpKeys:    "p",
+		HintKeys:    "p",
+		Description: "Pull selected image:tag with docker",
+		HintLabel:   "pull",
 	},
 	shortcutOpenProjectImages: {
 		Keys:        []string{"enter"},
@@ -459,6 +467,7 @@ func (m Model) helpActionsForPage(page shortcutPage) []shortcutAction {
 		actions = append(actions,
 			shortcutOpenExternalTagHistory,
 			shortcutCopyImageTag,
+			shortcutPullImageTag,
 			shortcutFocusExternalSearch,
 			shortcutExitExternalMode,
 		)
@@ -468,6 +477,7 @@ func (m Model) helpActionsForPage(page shortcutPage) []shortcutAction {
 		actions = append(actions,
 			shortcutOpenExternalTagHistory,
 			shortcutCopyImageTag,
+			shortcutPullImageTag,
 			shortcutFocusExternalSearch,
 			shortcutExitExternalMode,
 		)
@@ -480,7 +490,7 @@ func (m Model) helpActionsForPage(page shortcutPage) []shortcutAction {
 		return append(actions, shortcutOpenImageTags, shortcutBack)
 	case shortcutPageTags:
 		actions := cloneActions(listHelpActions)
-		return append(actions, shortcutOpenTagHistory, shortcutCopyImageTag, shortcutBack)
+		return append(actions, shortcutOpenTagHistory, shortcutCopyImageTag, shortcutPullImageTag, shortcutBack)
 	case shortcutPageHistory:
 		actions := cloneActions(listHelpActions)
 		if m.dockerHubActive || m.githubActive {
@@ -524,6 +534,7 @@ func (m Model) hintActionsForPage(page shortcutPage) []shortcutAction {
 			shortcutFocusExternalSearch,
 			shortcutOpenExternalTagHistory,
 			shortcutCopyImageTag,
+			shortcutPullImageTag,
 			shortcutExitExternalMode,
 		)
 		return actions
@@ -533,6 +544,7 @@ func (m Model) hintActionsForPage(page shortcutPage) []shortcutAction {
 			shortcutFocusExternalSearch,
 			shortcutOpenExternalTagHistory,
 			shortcutCopyImageTag,
+			shortcutPullImageTag,
 			shortcutExitExternalMode,
 		)
 		return actions
@@ -544,7 +556,7 @@ func (m Model) hintActionsForPage(page shortcutPage) []shortcutAction {
 		return append(actions, shortcutOpenImageTags, shortcutBack)
 	case shortcutPageTags:
 		actions := cloneActions(listHintActions)
-		return append(actions, shortcutOpenTagHistory, shortcutCopyImageTag, shortcutBack)
+		return append(actions, shortcutOpenTagHistory, shortcutCopyImageTag, shortcutPullImageTag, shortcutBack)
 	case shortcutPageHistory:
 		actions := cloneActions(listHintActions)
 		if m.dockerHubActive || m.githubActive {

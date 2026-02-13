@@ -189,6 +189,11 @@ type historyMsg struct {
 	err     error
 }
 
+type dockerPullMsg struct {
+	reference string
+	err       error
+}
+
 type dockerHubTagsMsg struct {
 	tags       []registry.Tag
 	image      string

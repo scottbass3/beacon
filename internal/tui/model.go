@@ -197,6 +197,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateTagsMsg(msg)
 	case historyMsg:
 		return m.updateHistoryMsg(msg)
+	case dockerPullMsg:
+		return m.updateDockerPullMsg(msg)
 	case dockerHubTagsMsg:
 		return m.updateDockerHubTagsMsg(msg)
 	case githubTagsMsg:

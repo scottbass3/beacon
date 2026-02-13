@@ -95,6 +95,7 @@ Core keys:
 - `/`: filter current list
 - `r`: refresh current view
 - `c`: copy selected `image:tag` (when browsing tags)
+- `p`: pull selected `image:tag` with Docker (when browsing tags)
 - `?` or `F1`: help
 
 ## Debug logging
