@@ -94,6 +94,7 @@ Core keys:
 - `Esc`: go back one level
 - `/`: filter current list
 - `r`: refresh current view
+- `c`: copy selected `image:tag` (when browsing tags)
 - `?` or `F1`: help
 
 ## Debug logging

@@ -145,6 +145,7 @@ func (m Model) currentPageHelpEntries() []helpEntry {
 	if m.dockerHubActive {
 		entries = append(entries,
 			helpEntry{Keys: "Enter", Action: "Open selected tag"},
+			helpEntry{Keys: "c", Action: "Copy selected image:tag"},
 			helpEntry{Keys: "s", Action: "Focus Docker Hub search input"},
 			helpEntry{Keys: "Esc", Action: "Exit Docker Hub mode"},
 		)
@@ -153,6 +154,7 @@ func (m Model) currentPageHelpEntries() []helpEntry {
 	if m.githubActive {
 		entries = append(entries,
 			helpEntry{Keys: "Enter", Action: "Open selected tag"},
+			helpEntry{Keys: "c", Action: "Copy selected image:tag"},
 			helpEntry{Keys: "s", Action: "Focus GHCR search input"},
 			helpEntry{Keys: "Esc", Action: "Exit GHCR mode"},
 		)
@@ -173,6 +175,7 @@ func (m Model) currentPageHelpEntries() []helpEntry {
 	case FocusTags:
 		entries = append(entries,
 			helpEntry{Keys: "Enter", Action: "Open selected tag history"},
+			helpEntry{Keys: "c", Action: "Copy selected image:tag"},
 			helpEntry{Keys: "Esc", Action: "Back to images"},
 		)
 	case FocusHistory:

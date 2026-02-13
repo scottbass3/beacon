@@ -59,6 +59,9 @@ func (m Model) handleExternalKey(kind externalModeKind, msg tea.KeyMsg) (tea.Mod
 			return m, m.handleEscape()
 		}
 		return m.exitExternalMode(kind)
+	case "c":
+		m.copySelectedTagReference()
+		return m, nil
 	case ":":
 		return m.enterCommandMode()
 	case "enter":

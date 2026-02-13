@@ -133,21 +133,21 @@ func (m Model) renderModeInputLine() string {
 func (m Model) renderShortcutHintLine() string {
 	switch {
 	case m.helpActive:
-		return "Help: esc/?/f1 close  q quit"
+		return "Help: esc/?/f1 close   q quit"
 	case m.commandActive:
-		return "Command: tab complete  up/down cycle  enter run  esc cancel  ? help"
+		return "Command: tab complete   up/down cycle   enter run   esc cancel   ? help"
 	case m.filterActive:
-		return "Filter: type text  enter apply  esc clear  : command  ? help"
+		return "Filter: type text   enter apply   esc clear   : command   ? help"
 	case m.dockerHubActive && m.dockerHubInputFocus:
-		return "Docker Hub search: type image  enter search  esc exit Docker Hub  ? help"
+		return "Docker Hub search: type image   enter search   esc exit Docker Hub   ? help"
 	case m.githubActive && m.githubInputFocus:
-		return "GHCR search: type image  enter search  esc exit GHCR  ? help"
+		return "GHCR search: type image   enter search   esc exit GHCR   ? help"
 	case m.dockerHubActive:
-		return "Common: ? help  : command  / filter  s search  enter open  esc exit  r refresh  q quit"
+		return "Shortcuts: ? help   : command   / filter   s search   enter open   c copy   esc exit   r refresh   q quit"
 	case m.githubActive:
-		return "Common: ? help  : command  / filter  s search  enter open  esc exit  r refresh  q quit"
+		return "Shortcuts: ? help   : command   / filter   s search   enter open   c copy   esc exit   r refresh   q quit"
 	default:
-		return "Common: ? help  : command  / filter  enter open  esc back  r refresh  q quit"
+		return "Shortcuts: ? help   : command   / filter   enter open   c copy   esc back   r refresh   q quit"
 	}
 }
 

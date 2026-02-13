@@ -33,6 +33,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openQuitConfirm()
 	case "esc":
 		return m, m.handleEscape()
+	case "c":
+		m.copySelectedTagReference()
+		return m, nil
 	case "/":
 		m.filterActive = true
 		m.filterInput.Focus()
