@@ -2,7 +2,6 @@
 
 [![Tests](https://github.com/scottbass3/beacon/actions/workflows/tests.yml/badge.svg)](https://github.com/scottbass3/beacon/actions/workflows/tests.yml)
 [![Release](https://github.com/scottbass3/beacon/actions/workflows/release.yml/badge.svg)](https://github.com/scottbass3/beacon/actions/workflows/release.yml)
-[![Deps Up-to-Date](https://img.shields.io/github/actions/workflow/status/scottbass3/beacon/dependencies.yml?branch=main&event=push&label=deps%20up-to-date)](https://github.com/scottbass3/beacon/actions/workflows/dependencies.yml)
 [![Latest Release](https://img.shields.io/github/v/release/scottbass3/beacon?display_name=tag)](https://github.com/scottbass3/beacon/releases/latest)
 
 Beacon is a terminal UI for exploring container image metadata across registries.
