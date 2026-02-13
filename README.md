@@ -5,7 +5,7 @@ Beacon is a terminal UI for browsing remote Docker registries. This app allow to
 ## Quick start
 
 ```bash
-go run ./cmd/beacon --registry https://registry.example.com
+go run ./cmd/beacon
 ```
 
 ## Configuration
