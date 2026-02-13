@@ -11,14 +11,14 @@ import (
 
 func (m Model) handleExternalKey(kind externalModeKind, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.filterActive {
-		switch msg.String() {
-		case "esc":
+		switch {
+		case isShortcut(msg, shortcutClearFilter):
 			m.clearFilter()
 			m.syncTable()
 			return m, nil
-		case ":":
+		case isShortcut(msg, shortcutOpenCommand):
 			return m.enterCommandMode()
-		case "enter":
+		case isShortcut(msg, shortcutApplyFilter):
 			m.stopFilterEditing()
 			m.syncTable()
 			return m, nil
@@ -35,12 +35,12 @@ func (m Model) handleExternalKey(kind externalModeKind, msg tea.KeyMsg) (tea.Mod
 	}
 
 	if m.externalInputFocused(kind) {
-		switch msg.String() {
-		case "ctrl+c":
+		switch {
+		case isShortcut(msg, shortcutForceQuit):
 			return m.openQuitConfirm()
-		case "esc":
+		case isShortcut(msg, shortcutExitExternalMode):
 			return m.exitExternalMode(kind)
-		case "enter":
+		case isShortcut(msg, shortcutSearchExternal):
 			query := strings.TrimSpace(m.externalInputValue(kind))
 			if query == "" {
 				m.status = kind.searchPlaceholder()
@@ -51,39 +51,35 @@ func (m Model) handleExternalKey(kind externalModeKind, msg tea.KeyMsg) (tea.Mod
 		return m, m.updateExternalInput(kind, msg)
 	}
 
-	switch msg.String() {
-	case "ctrl+c", "q":
+	switch {
+	case isShortcut(msg, shortcutQuit):
 		return m.openQuitConfirm()
-	case "esc":
+	case isShortcut(msg, shortcutBack):
 		if m.focus == FocusHistory {
 			return m, m.handleEscape()
 		}
 		return m.exitExternalMode(kind)
-	case "c":
+	case isShortcut(msg, shortcutCopyImageTag):
 		m.copySelectedTagReference()
 		return m, nil
-	case ":":
+	case isShortcut(msg, shortcutOpenCommand):
 		return m.enterCommandMode()
-	case "enter":
+	case isShortcut(msg, shortcutOpenExternalTagHistory):
 		return m, m.openExternalTagHistory(kind)
-	case "s":
+	case isShortcut(msg, shortcutFocusExternalSearch):
 		m.setExternalInputValue(kind, "")
 		m.setExternalInputFocus(kind, true)
 		cmd := m.focusExternalInput(kind)
 		m.externalInputCursorEnd(kind)
 		return m, cmd
-	case "/":
+	case isShortcut(msg, shortcutOpenFilter):
 		m.filterActive = true
 		m.filterInput.Focus()
 		m.filterInput.CursorEnd()
 		m.syncTable()
 		return m, nil
-	case "r":
+	case isShortcut(msg, shortcutRefresh):
 		return m, m.refreshExternal(kind)
-	}
-
-	if len(msg.Runes) == 1 && msg.Runes[0] == ':' {
-		return m.enterCommandMode()
 	}
 	if m.handleTableNavKey(msg) {
 		return m, m.maybeLoadExternalOnBottom(kind, msg)
@@ -229,8 +225,11 @@ func (m *Model) openExternalTagHistory(kind externalModeKind) tea.Cmd {
 }
 
 func (m *Model) maybeLoadExternalOnBottom(kind externalModeKind, msg tea.KeyMsg) tea.Cmd {
-	switch msg.String() {
-	case "down", "j", "pgdown", "f", " ", "ctrl+d", "d", "end", "G":
+	switch {
+	case isShortcut(msg, shortcutMoveDown),
+		isShortcut(msg, shortcutMovePageDown),
+		isShortcut(msg, shortcutMoveHalfDown),
+		isShortcut(msg, shortcutMoveBottom):
 	default:
 		return nil
 	}

@@ -36,9 +36,6 @@ func (m Model) updateKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.isAuthModalActive() {
 		return m.handleAuthKey(msg)
 	}
-	if !m.commandActive && (msg.String() == ":" || (len(msg.Runes) == 1 && msg.Runes[0] == ':')) {
-		return m.enterCommandMode()
-	}
 	if m.commandActive {
 		return m.handleCommandKey(msg)
 	}

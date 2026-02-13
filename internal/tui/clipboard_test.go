@@ -30,7 +30,7 @@ func TestCopySelectedTagReference(t *testing.T) {
 				m.syncTable()
 			},
 			handle: func(m Model) (tea.Model, tea.Cmd) {
-				return m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+				return m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
 			},
 			wantCopy: "team/service:v1.2.3",
 		},
@@ -44,7 +44,7 @@ func TestCopySelectedTagReference(t *testing.T) {
 				m.syncTable()
 			},
 			handle: func(m Model) (tea.Model, tea.Cmd) {
-				return m.handleDockerHubKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+				return m.handleDockerHubKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
 			},
 			wantCopy: "library/nginx:alpine",
 		},
@@ -58,7 +58,7 @@ func TestCopySelectedTagReference(t *testing.T) {
 				m.syncTable()
 			},
 			handle: func(m Model) (tea.Model, tea.Cmd) {
-				return m.handleGitHubKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+				return m.handleGitHubKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
 			},
 			wantCopy: "org/service:latest",
 		},
@@ -108,7 +108,7 @@ func TestCopySelectedTagReferenceClipboardError(t *testing.T) {
 		writeClipboard = clipboardWriteAll
 	})
 
-	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
 	next := updated.(Model)
 	if !strings.Contains(next.status, "Failed to copy") {
 		t.Fatalf("expected copy error status, got %q", next.status)
@@ -123,7 +123,7 @@ func TestCopySelectedTagReferenceWithoutSelection(t *testing.T) {
 	m.hasSelectedImage = true
 	m.selectedImage = registry.Image{Name: "team/service"}
 
-	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
 	next := updated.(Model)
 	if next.status != "No tag selected to copy" {
 		t.Fatalf("expected no selection status, got %q", next.status)

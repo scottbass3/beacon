@@ -127,3 +127,22 @@ func TestHelpShortcutIgnoredWhileExternalInputFocused(t *testing.T) {
 		t.Fatalf("expected '?' to be typed into search input, got %q", next.dockerHubInput.Value())
 	}
 }
+
+func TestCommandShortcutIgnoredWhileExternalInputFocused(t *testing.T) {
+	auth := registry.Auth{Kind: "registry_v2"}
+	auth.RegistryV2.Anonymous = true
+	m := NewModel("https://registry.example.com", auth, nil, false, nil, nil, "", "")
+	m.dockerHubActive = true
+	m.dockerHubInputFocus = true
+	m.dockerHubInput.Focus()
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{':'}})
+	next := updated.(Model)
+
+	if next.commandActive {
+		t.Fatalf("command mode should not open while external search input is focused")
+	}
+	if next.dockerHubInput.Value() != ":" {
+		t.Fatalf("expected ':' to be typed into search input, got %q", next.dockerHubInput.Value())
+	}
+}

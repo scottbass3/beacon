@@ -11,29 +11,29 @@ import (
 )
 
 func (m Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c", "q":
+	switch {
+	case isShortcut(msg, shortcutQuit):
 		return m.openQuitConfirm()
-	case "esc":
+	case isShortcut(msg, shortcutCommandCancel):
 		return m.exitCommandMode()
-	case "tab":
+	case isShortcut(msg, shortcutCommandAutocomplete):
 		if len(m.commandMatches) > 0 {
 			m.commandInput.SetValue(m.commandMatches[m.commandIndex])
 			m.commandInput.CursorEnd()
 			return m, nil
 		}
-	case "up":
+	case isShortcut(msg, shortcutCommandPrevSuggestion):
 		if len(m.commandMatches) > 0 {
 			m.commandIndex--
 			if m.commandIndex < 0 {
 				m.commandIndex = len(m.commandMatches) - 1
 			}
 		}
-	case "down":
+	case isShortcut(msg, shortcutCommandNextSuggestion):
 		if len(m.commandMatches) > 0 {
 			m.commandIndex = (m.commandIndex + 1) % len(m.commandMatches)
 		}
-	case "enter":
+	case isShortcut(msg, shortcutCommandRun):
 		return m.runCommand()
 	}
 

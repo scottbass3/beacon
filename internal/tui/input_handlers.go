@@ -6,14 +6,14 @@ import (
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.filterActive {
-		switch msg.String() {
-		case "esc":
+		switch {
+		case isShortcut(msg, shortcutClearFilter):
 			m.clearFilter()
 			m.syncTable()
 			return m, nil
-		case ":":
+		case isShortcut(msg, shortcutOpenCommand):
 			return m.enterCommandMode()
-		case "enter":
+		case isShortcut(msg, shortcutApplyFilter):
 			m.stopFilterEditing()
 			m.syncTable()
 			return m, nil
@@ -28,30 +28,26 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	switch msg.String() {
-	case "ctrl+c", "q":
+	switch {
+	case isShortcut(msg, shortcutQuit):
 		return m.openQuitConfirm()
-	case "esc":
+	case isShortcut(msg, shortcutBack):
 		return m, m.handleEscape()
-	case "c":
+	case isShortcut(msg, shortcutCopyImageTag):
 		m.copySelectedTagReference()
 		return m, nil
-	case "/":
+	case isShortcut(msg, shortcutOpenFilter):
 		m.filterActive = true
 		m.filterInput.Focus()
 		m.filterInput.CursorEnd()
 		m.syncTable()
 		return m, nil
-	case ":":
+	case isShortcut(msg, shortcutOpenCommand):
 		return m.enterCommandMode()
-	case "r":
+	case isShortcut(msg, shortcutRefresh):
 		return m, m.refreshCurrent()
-	case "enter":
+	case isShortcut(msg, shortcutOpenTagHistory):
 		return m, m.handleEnter()
-	}
-
-	if len(msg.Runes) == 1 && msg.Runes[0] == ':' {
-		return m.enterCommandMode()
 	}
 	if m.handleTableNavKey(msg) {
 		return m, nil
@@ -77,29 +73,29 @@ func (m *Model) handleTableNavKey(msg tea.KeyMsg) bool {
 	}
 	step := maxInt(1, m.table.Height())
 
-	switch msg.String() {
-	case "up", "k":
+	switch {
+	case isShortcut(msg, shortcutMoveUp):
 		m.table.MoveUp(1)
 		return true
-	case "down", "j":
+	case isShortcut(msg, shortcutMoveDown):
 		m.table.MoveDown(1)
 		return true
-	case "pgup", "b":
+	case isShortcut(msg, shortcutMovePageUp):
 		m.table.MoveUp(step)
 		return true
-	case "pgdown", "f", " ":
+	case isShortcut(msg, shortcutMovePageDown):
 		m.table.MoveDown(step)
 		return true
-	case "ctrl+u", "u":
+	case isShortcut(msg, shortcutMoveHalfUp):
 		m.table.MoveUp(maxInt(1, step/2))
 		return true
-	case "ctrl+d", "d":
+	case isShortcut(msg, shortcutMoveHalfDown):
 		m.table.MoveDown(maxInt(1, step/2))
 		return true
-	case "home", "g":
+	case isShortcut(msg, shortcutMoveTop):
 		m.table.GotoTop()
 		return true
-	case "end", "G":
+	case isShortcut(msg, shortcutMoveBottom):
 		m.table.GotoBottom()
 		return true
 	default:
