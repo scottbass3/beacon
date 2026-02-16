@@ -61,32 +61,27 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Build archive
+      - name: Build binary
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
           set -euo pipefail
 
-          binary_name="beacon"
+          binary_path="dist/beacon_${GITHUB_REF_NAME}_${GOOS}_${GOARCH}"
           if [[ "${GOOS}" == "windows" ]]; then
-            binary_name="${binary_name}.exe"
+            binary_path="${binary_path}.exe"
           fi
 
-          artifact_dir="beacon_${GITHUB_REF_NAME}_${GOOS}_${GOARCH}"
-          mkdir -p "dist/${artifact_dir}"
-
+          mkdir -p dist
           CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" \
-            go build -trimpath -ldflags="-s -w" -o "dist/${artifact_dir}/${binary_name}" ./cmd/beacon
-
-          tar -czf "dist/${artifact_dir}.tar.gz" -C dist "${artifact_dir}"
-          rm -rf "dist/${artifact_dir}"
+            go build -trimpath -ldflags="-s -w" -o "${binary_path}" ./cmd/beacon
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: beacon-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/*.tar.gz
+          path: dist/beacon_*
 
   release:
     runs-on: ubuntu-latest
@@ -102,13 +97,13 @@ jobs:
       - name: Generate checksums
         run: |
           cd dist
-          sha256sum *.tar.gz > checksums.txt
+          sha256sum beacon_* > checksums.txt
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/*.tar.gz
+            dist/beacon_*
             dist/checksums.txt
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
