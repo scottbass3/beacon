@@ -10,7 +10,7 @@ import (
 
 func (m Model) handleAuthKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "ctrl+c", "q":
+	case "ctrl+c":
 		return m.openQuitConfirm()
 	case "tab", "down":
 		m.authFocus = (m.authFocus + 1) % m.authFieldCount()

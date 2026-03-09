@@ -48,9 +48,9 @@ func (m Model) renderAuthModal() string {
 		remember = modalLabelStyle.Render(remember)
 	}
 
-	help := "tab/shift+tab move  enter submit  q quit"
+	help := "tab/shift+tab move  enter submit  ctrl+c quit"
 	if m.authUI().ShowRemember {
-		help = "tab/shift+tab move  space toggle  enter submit  q quit"
+		help = "tab/shift+tab move  space toggle  enter submit  ctrl+c quit"
 	}
 
 	lines = append(lines,
