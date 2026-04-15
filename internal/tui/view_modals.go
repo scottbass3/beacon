@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	lipglossv2 "github.com/charmbracelet/lipgloss/v2"
+	lipgloss "charm.land/lipgloss/v2"
 )
 
 func (m Model) renderAuthModal() string {
@@ -96,11 +96,9 @@ func (m Model) renderConfirmModal() string {
 	if m.confirmFocus == 1 {
 		confirm = confirmButtonFocusStyle.Render(confirmLabel)
 	}
-	buttonRow := lipglossv2.JoinHorizontal(
-		lipglossv2.Top,
-		lipglossv2.NewStyle().MarginRight(2).Render(cancel),
-		confirm,
-	)
+	gapHeight := lipgloss.Height(cancel)
+	gap := lipgloss.NewStyle().Background(colorSurface).Width(2).Height(gapHeight).Render("")
+	buttonRow := lipgloss.JoinHorizontal(lipgloss.Top, cancel, gap, confirm)
 
 	lines := []string{
 		modalTitleStyle.Render(title),
@@ -119,15 +117,14 @@ func (m Model) renderConfirmModal() string {
 
 func (m Model) renderModal(base, modal string) string {
 	width, height := m.modalViewport(base)
-	background := lipglossv2.Place(width, height, lipglossv2.Left, lipglossv2.Top, modalBackdropStyle.Render(base))
-	canvas := lipglossv2.NewCanvas(lipglossv2.NewLayer(background))
-	canvas.AddLayers(
-		lipglossv2.NewLayer(modal).
-			X(maxInt(0, (width-lipglossv2.Width(modal))/2)).
-			Y(maxInt(0, (height-lipglossv2.Height(modal))/2)).
+	compositor := lipgloss.NewCompositor(
+		lipgloss.NewLayer(base),
+		lipgloss.NewLayer(modal).
+			X(maxInt(0, (width-lipgloss.Width(modal))/2)).
+			Y(maxInt(0, (height-lipgloss.Height(modal))/2)).
 			Z(1),
 	)
-	return canvas.Render()
+	return compositor.Render()
 }
 
 func (m Model) renderModalCard(content string, maxWidth int) string {

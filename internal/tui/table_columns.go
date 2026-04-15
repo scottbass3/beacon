@@ -2,7 +2,7 @@ package tui
 
 import (
 	"github.com/charmbracelet/bubbles/table"
-	"github.com/charmbracelet/lipgloss"
+	lipglossv1 "github.com/charmbracelet/lipgloss"
 
 	"github.com/scottbass3/beacon/internal/registry"
 )
@@ -108,16 +108,16 @@ func makeColumns(focus Focus, width int, spec registry.TableSpec) []table.Column
 func tableStyles() table.Styles {
 	styles := table.DefaultStyles()
 	styles.Header = styles.Header.
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(colorBorder).
+		BorderStyle(lipglossv1.NormalBorder()).
+		BorderForeground(lipglossv1.Color(rawColorBorder)).
 		BorderBottom(true).
-		Foreground(colorTitleText).
-		Background(colorSurface2).
+		Foreground(lipglossv1.Color(rawColorTitleText)).
+		Background(lipglossv1.Color(rawColorSurface2)).
 		Bold(true)
-	styles.Cell = lipgloss.NewStyle().Padding(0, 1)
+	styles.Cell = lipglossv1.NewStyle().Padding(0, 1)
 	styles.Selected = styles.Selected.
-		Foreground(colorSelected).
-		Background(colorAccent).
+		Foreground(lipglossv1.Color(rawColorSelected)).
+		Background(lipglossv1.Color(rawColorAccent)).
 		Bold(true)
 	return styles
 }

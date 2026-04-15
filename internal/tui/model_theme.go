@@ -1,67 +1,72 @@
 package tui
 
-import (
-	"github.com/charmbracelet/lipgloss"
-	lipglossv2 "github.com/charmbracelet/lipgloss/v2"
+import lipgloss "charm.land/lipgloss/v2"
+
+// Raw ANSI color codes shared with table_columns.go (which uses lipgloss v1 for bubbles).
+const (
+	rawColorPrimary   = "75"
+	rawColorAccent    = "208"
+	rawColorMuted     = "241"
+	rawColorSelected  = "16"
+	rawColorBorder    = "238"
+	rawColorSurface   = "235"
+	rawColorSurface2  = "232"
+	rawColorTitleText = "255"
+	rawColorSuccess   = "42"
+	rawColorDanger    = "196"
 )
 
 var (
-	colorPrimary   = lipgloss.Color("39")
-	colorAccent    = lipgloss.Color("214")
-	colorMuted     = lipgloss.Color("244")
-	colorSelected  = lipgloss.Color("16")
-	colorBorder    = lipgloss.Color("74")
-	colorSurface   = lipgloss.Color("236")
-	colorSurface2  = lipgloss.Color("234")
-	colorTitleText = lipgloss.Color("230")
-	colorSuccess   = lipgloss.Color("78")
+	colorPrimary   = lipgloss.Color(rawColorPrimary)
+	colorAccent    = lipgloss.Color(rawColorAccent)
+	colorMuted     = lipgloss.Color(rawColorMuted)
+	colorBorder    = lipgloss.Color(rawColorBorder)
+	colorSurface   = lipgloss.Color(rawColorSurface)
+	colorSurface2  = lipgloss.Color(rawColorSurface2)
+	colorTitleText = lipgloss.Color(rawColorTitleText)
+	colorSuccess   = lipgloss.Color(rawColorSuccess)
+	colorDanger    = lipgloss.Color(rawColorDanger)
 )
 
 var (
-	modalColorPrimary  = lipglossv2.Color("39")
-	modalColorAccent   = lipglossv2.Color("214")
-	modalColorMuted    = lipglossv2.Color("244")
-	modalColorBorder   = lipglossv2.Color("74")
-	modalColorSurface  = lipglossv2.Color("236")
-	modalColorSurface2 = lipglossv2.Color("234")
-	modalColorTitle    = lipglossv2.Color("230")
-	modalColorDanger   = lipglossv2.Color("196")
-)
+	titleStyle          = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+	statusStyle         = lipgloss.NewStyle().Foreground(colorMuted)
+	statusLoadingStyle  = lipgloss.NewStyle().Foreground(colorSuccess).Bold(true)
+	metaLabelStyle      = lipgloss.NewStyle().Foreground(colorMuted).MarginRight(1)
+	metaValueStyle      = lipgloss.NewStyle().Foreground(colorTitleText).MarginRight(3)
+	metaSeparatorStyle  = lipgloss.NewStyle().Foreground(colorBorder)
+	modeInputStyle      = lipgloss.NewStyle().Foreground(colorAccent).Padding(0, 1)
+	shortcutKeyStyle    = lipgloss.NewStyle().Foreground(colorAccent)
+	shortcutLabelStyle  = lipgloss.NewStyle().Foreground(colorMuted)
+	shortcutSepStyle    = lipgloss.NewStyle().Foreground(colorBorder)
+	shortcutPrefixStyle = lipgloss.NewStyle().Foreground(colorMuted)
+	helpHeadingStyle    = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	helpItemStyle       = lipgloss.NewStyle().Foreground(colorTitleText)
+	helpFooterStyle     = lipgloss.NewStyle().Foreground(colorMuted)
+	emptyStyle          = lipgloss.NewStyle().Foreground(colorMuted).Italic(true)
 
-var (
-	titleStyle             = lipgloss.NewStyle().Foreground(colorTitleText).Background(colorPrimary).Bold(true).Padding(0, 1).MarginRight(1)
-	statusStyle            = lipgloss.NewStyle().Foreground(colorTitleText).Background(colorSurface2).Padding(0, 1)
-	statusLoadingStyle     = lipgloss.NewStyle().Foreground(colorSurface2).Background(colorSuccess).Bold(true).Padding(0, 1)
-	metaLabelStyle         = lipgloss.NewStyle().Foreground(colorMuted).Bold(true).MarginRight(1)
-	metaValueStyle         = lipgloss.NewStyle().Foreground(colorTitleText).MarginRight(2)
-	modeInputStyle         = lipgloss.NewStyle().Foreground(colorAccent).Background(colorSurface2).Padding(0, 1)
-	shortcutHintStyle      = lipgloss.NewStyle().Foreground(colorMuted)
-	helpHeadingStyle       = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
-	helpItemStyle          = lipgloss.NewStyle().Foreground(colorTitleText)
-	helpFooterStyle        = lipgloss.NewStyle().Foreground(colorMuted)
-	emptyStyle             = lipgloss.NewStyle().Foreground(colorMuted).Italic(true)
-	mainSectionStyle       = lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(colorBorder).Padding(0, 1)
-	mainSectionTitleStyle  = lipgloss.NewStyle().Foreground(colorSurface2).Background(colorAccent).Bold(true).Padding(0, 2)
-	mainSectionTitleLine   = lipgloss.NewStyle()
-	topSectionStyle        = lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(colorBorder).Padding(0, 1)
-	logTitleStyle          = lipgloss.NewStyle().Foreground(colorTitleText).Background(colorPrimary).Bold(true).Padding(0, 1)
-	logBoxStyle            = lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(colorBorder).Background(colorSurface).Padding(0, 1)
-	modalBackdropStyle     = lipglossv2.NewStyle().Foreground(modalColorMuted).Background(modalColorSurface2).Faint(true)
-	modalPanelStyle        = lipglossv2.NewStyle().BorderStyle(lipglossv2.DoubleBorder()).BorderForeground(modalColorBorder).Background(modalColorSurface).Padding(1, 2)
-	modalTitleStyle        = lipglossv2.NewStyle().Foreground(modalColorPrimary).Bold(true)
-	modalLabelStyle        = lipglossv2.NewStyle().Foreground(modalColorMuted)
-	modalErrorStyle        = lipglossv2.NewStyle().Foreground(modalColorDanger).Bold(true)
-	modalInputStyle        = lipglossv2.NewStyle().Foreground(modalColorTitle).Background(modalColorSurface2).BorderStyle(lipglossv2.NormalBorder()).BorderForeground(modalColorMuted).Padding(0, 1)
-	modalInputFocusStyle   = lipglossv2.NewStyle().Foreground(modalColorTitle).Background(modalColorSurface2).BorderStyle(lipglossv2.NormalBorder()).BorderForeground(modalColorAccent).Bold(true).Padding(0, 1)
-	modalFocusStyle        = lipglossv2.NewStyle().Foreground(modalColorAccent).Bold(true)
-	modalButtonStyle       = lipglossv2.NewStyle().Foreground(modalColorMuted).Background(modalColorSurface2).BorderStyle(lipglossv2.RoundedBorder()).BorderForeground(modalColorMuted).BorderBackground(modalColorSurface).Padding(0, 1)
-	modalButtonFocusStyle  = lipglossv2.NewStyle().Foreground(modalColorSurface2).Background(modalColorAccent).BorderStyle(lipglossv2.RoundedBorder()).BorderForeground(modalColorAccent).BorderBackground(modalColorSurface).Bold(true).Padding(0, 1)
-	modalDangerButtonStyle = lipglossv2.NewStyle().Foreground(modalColorDanger).Background(modalColorSurface2).BorderStyle(lipglossv2.RoundedBorder()).BorderForeground(modalColorDanger).BorderBackground(modalColorSurface).Padding(0, 1)
-	modalDangerFocusStyle  = lipglossv2.NewStyle().Foreground(modalColorSurface2).Background(modalColorDanger).BorderStyle(lipglossv2.RoundedBorder()).BorderForeground(modalColorDanger).BorderBackground(modalColorSurface).Bold(true).Padding(0, 1)
-	modalOptionStyle       = lipglossv2.NewStyle().Foreground(modalColorTitle).Background(modalColorSurface2).BorderStyle(lipglossv2.NormalBorder()).BorderForeground(modalColorMuted).BorderBackground(modalColorSurface).Padding(0, 1)
-	modalOptionFocusStyle  = lipglossv2.NewStyle().Foreground(modalColorSurface2).Background(modalColorAccent).BorderStyle(lipglossv2.NormalBorder()).BorderForeground(modalColorAccent).BorderBackground(modalColorSurface).Bold(true).Padding(0, 1)
-	modalOptionMutedStyle  = lipglossv2.NewStyle().Foreground(modalColorMuted)
-	modalOptionErrorStyle  = lipglossv2.NewStyle().Foreground(modalColorDanger).Faint(true)
-	modalHelpStyle         = lipglossv2.NewStyle().Foreground(modalColorMuted)
-	modalDividerStyle      = lipglossv2.NewStyle().Foreground(modalColorBorder)
+	mainSectionStyle      = lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(colorBorder).Padding(0, 1)
+	mainSectionTitleStyle = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	mainSectionDivStyle   = lipgloss.NewStyle().Foreground(colorBorder)
+	topSectionStyle       = lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(colorBorder).Padding(0, 1)
+	logTitleStyle         = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+	logBoxStyle           = lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(colorBorder).Background(colorSurface).Padding(0, 1)
+
+	modalPanelStyle        = lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(colorBorder).Background(colorSurface).Padding(1, 2)
+	modalTitleStyle        = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+	modalLabelStyle        = lipgloss.NewStyle().Foreground(colorMuted)
+	modalErrorStyle        = lipgloss.NewStyle().Foreground(colorDanger).Bold(true)
+	modalInputStyle        = lipgloss.NewStyle().Background(colorSurface2).BorderStyle(lipgloss.NormalBorder()).BorderForeground(colorMuted).BorderBackground(colorSurface).Padding(0, 1)
+	modalInputFocusStyle   = lipgloss.NewStyle().Background(colorSurface2).BorderStyle(lipgloss.NormalBorder()).BorderForeground(colorAccent).BorderBackground(colorSurface).Padding(0, 1)
+	modalFocusStyle        = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	modalButtonStyle       = lipgloss.NewStyle().Foreground(colorMuted).Background(colorSurface2).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(colorMuted).BorderBackground(colorSurface).Padding(0, 1)
+	modalButtonFocusStyle  = lipgloss.NewStyle().Foreground(colorSurface2).Background(colorAccent).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(colorAccent).BorderBackground(colorSurface).Bold(true).Padding(0, 1)
+	modalDangerButtonStyle = lipgloss.NewStyle().Foreground(colorDanger).Background(colorSurface2).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(colorDanger).BorderBackground(colorSurface).Padding(0, 1)
+	modalDangerFocusStyle  = lipgloss.NewStyle().Foreground(colorSurface2).Background(colorDanger).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(colorDanger).BorderBackground(colorSurface).Bold(true).Padding(0, 1)
+	modalOptionStyle       = lipgloss.NewStyle().Foreground(colorTitleText).Background(colorSurface2).BorderStyle(lipgloss.NormalBorder()).BorderForeground(colorMuted).BorderBackground(colorSurface).Padding(0, 1)
+	modalOptionFocusStyle  = lipgloss.NewStyle().Foreground(colorSurface2).Background(colorAccent).BorderStyle(lipgloss.NormalBorder()).BorderForeground(colorAccent).BorderBackground(colorSurface).Bold(true).Padding(0, 1)
+	modalOptionMutedStyle  = lipgloss.NewStyle().Foreground(colorMuted)
+	modalOptionErrorStyle  = lipgloss.NewStyle().Foreground(colorDanger).Faint(true)
+	modalHelpStyle         = lipgloss.NewStyle().Foreground(colorMuted)
+	modalDividerStyle      = lipgloss.NewStyle().Foreground(colorBorder)
 )

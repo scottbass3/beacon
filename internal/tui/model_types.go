@@ -34,7 +34,7 @@ const (
 	maxVisibleLogs          = 5
 	maxFilterWidth          = 40
 	tableChromeLines        = 2
-	mainSectionTitleLines   = 1
+	mainSectionTitleLines   = 2 // title line + divider line
 	mainSectionBorderLines  = 2
 	mainSectionHChromeChars = 4
 	defaultRenderWidth      = 80

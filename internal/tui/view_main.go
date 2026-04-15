@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	lipgloss "charm.land/lipgloss/v2"
 )
 
 func (m Model) renderApp() string {
@@ -20,31 +20,41 @@ func (m Model) renderApp() string {
 func (m Model) renderTopSection() string {
 	contextName := strings.TrimSpace(m.context)
 	if contextName == "" {
-		contextName = "-"
+		contextName = "—"
 	}
 	statusValue := strings.TrimSpace(m.status)
 	if statusValue == "" {
-		statusValue = "-"
+		statusValue = "—"
 	}
-	statusLine := statusStyle.Render(statusValue)
+
+	var statusLine string
 	if m.isLoading() {
-		statusLine = statusLoadingStyle.Render("Loading")
-		if statusValue != "-" {
-			statusLine = statusLoadingStyle.Render("Loading " + statusValue)
+		loadLabel := "loading"
+		if statusValue != "—" {
+			loadLabel = "loading " + statusValue
 		}
+		statusLine = statusLoadingStyle.Render("● " + loadLabel)
+	} else {
+		statusLine = statusStyle.Render(statusValue)
 	}
+
+	headerLine := lipgloss.JoinHorizontal(lipgloss.Top,
+		titleStyle.Render("Beacon"),
+		metaSeparatorStyle.Render("  ·  "),
+		statusLine,
+	)
+
 	pathValue := strings.TrimSpace(m.currentPath())
 	if pathValue == "" {
 		pathValue = "/"
 	}
-	headerLine := lipgloss.JoinHorizontal(lipgloss.Top, titleStyle.Render("Beacon"), statusLine)
-	metaLine := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		metaLabelStyle.Render("Context"),
+	metaLine := lipgloss.JoinHorizontal(lipgloss.Top,
+		metaLabelStyle.Render("ctx"),
 		metaValueStyle.Render(contextName),
-		metaLabelStyle.Render("Path"),
+		metaLabelStyle.Render("path"),
 		metaValueStyle.Render(pathValue),
 	)
+
 	lines := []string{
 		headerLine,
 		metaLine,
@@ -52,7 +62,7 @@ func (m Model) renderTopSection() string {
 	if inputLine := m.renderModeInputLine(); inputLine != "" {
 		lines = append(lines, modeInputStyle.Render(inputLine))
 	}
-	lines = append(lines, shortcutHintStyle.Render(m.renderShortcutHintLine()))
+	lines = append(lines, m.renderStyledHintLine())
 	return topSectionStyle.Width(sectionPanelWidth(m.width)).Render(strings.Join(lines, "\n"))
 }
 
@@ -65,15 +75,10 @@ func (m Model) renderMainSection() string {
 		titleLabel = "Help"
 		body = m.renderHelpSectionBody()
 	}
-	title := mainSectionTitleStyle.Render(strings.ToUpper(titleLabel))
-	titleLine := mainSectionTitleLine.
-		Width(contentWidth).
-		Align(lipgloss.Center).
-		Render(title)
-	content := strings.Join([]string{
-		titleLine,
-		body,
-	}, "\n")
+
+	titleLine := mainSectionTitleStyle.Render("▸ " + titleLabel)
+	divider := mainSectionDivStyle.Render(strings.Repeat("─", contentWidth))
+	content := strings.Join([]string{titleLine, divider, body}, "\n")
 	return mainSectionStyle.Width(panelWidth).Render(content)
 }
 
@@ -132,6 +137,43 @@ func (m Model) renderModeInputLine() string {
 
 func (m Model) renderShortcutHintLine() string {
 	return m.shortcutHintLine()
+}
+
+func (m Model) renderStyledHintLine() string {
+	page := m.shortcutPage(true)
+	prefix := m.hintPrefixForPage(page)
+	actions := m.hintActionsForPage(page)
+
+	parts := make([]string, 0, len(actions))
+	for _, action := range actions {
+		def, ok := shortcutDefinitions[action]
+		if !ok || def.HintLabel == "" {
+			continue
+		}
+		keys := def.HintKeys
+		if keys == "" {
+			keys = def.HelpKeys
+		}
+		if keys == "" {
+			continue
+		}
+		part := shortcutKeyStyle.Render(keys) + " " + shortcutLabelStyle.Render(def.HintLabel)
+		parts = append(parts, part)
+	}
+
+	if len(parts) == 0 {
+		if prefix != "" && prefix != "Shortcuts" {
+			return shortcutPrefixStyle.Render(prefix)
+		}
+		return ""
+	}
+
+	sep := shortcutSepStyle.Render("  ·  ")
+	joined := strings.Join(parts, sep)
+	if prefix != "" && prefix != "Shortcuts" {
+		return shortcutPrefixStyle.Render(prefix+": ") + joined
+	}
+	return joined
 }
 
 func (m Model) renderBody() string {

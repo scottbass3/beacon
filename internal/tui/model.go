@@ -73,6 +73,7 @@ func NewModel(registryHost string, auth registry.Auth, logger registry.RequestLo
 	username.Placeholder = "username"
 	username.CharLimit = 128
 	username.Blur()
+	applyInputTheme(&username)
 
 	password := textinput.New()
 	password.Prompt = ""
@@ -81,6 +82,7 @@ func NewModel(registryHost string, auth registry.Auth, logger registry.RequestLo
 	password.EchoMode = textinput.EchoPassword
 	password.EchoCharacter = '*'
 	password.Blur()
+	applyInputTheme(&password)
 
 	remember := false
 	switch auth.Kind {

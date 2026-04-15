@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	lipglossv2 "github.com/charmbracelet/lipgloss/v2"
+	lipgloss "charm.land/lipgloss/v2"
 )
 
 func (m Model) renderContextFormModal() string {
@@ -69,17 +69,17 @@ func (m Model) renderContextFormModal() string {
 	if m.contextFormFocus == contextFormFocusPrimaryButton {
 		primary = modalButtonFocusStyle.Render(primaryLabel)
 	}
-	leftButton := lipglossv2.NewStyle().MarginRight(2).Render(secondary)
-	rightButton := primary
+	var leftButton, rightButton string
 	if m.shouldSwapContextFormActions() {
-		leftButton = lipglossv2.NewStyle().MarginRight(2).Render(primary)
+		leftButton = primary
 		rightButton = secondary
+	} else {
+		leftButton = secondary
+		rightButton = primary
 	}
-	buttonRow := lipglossv2.JoinHorizontal(
-		lipglossv2.Top,
-		leftButton,
-		rightButton,
-	)
+	gapHeight := lipgloss.Height(leftButton)
+	buttonGap := lipgloss.NewStyle().Background(colorSurface).Width(2).Height(gapHeight).Render("")
+	buttonRow := lipgloss.JoinHorizontal(lipgloss.Top, leftButton, buttonGap, rightButton)
 
 	lines := []string{
 		modalTitleStyle.Render(title),

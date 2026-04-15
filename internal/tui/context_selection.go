@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	lipglossv2 "github.com/charmbracelet/lipgloss/v2"
+	lipgloss "charm.land/lipgloss/v2"
 )
 
 func (m Model) contextSelectionHelpText() string {
@@ -158,8 +158,8 @@ func (m Model) renderContextSelectionModal() string {
 			hostLabel = modalOptionErrorStyle.Render("(no registry configured)")
 		}
 
-		row := prefix + lipglossv2.JoinHorizontal(
-			lipglossv2.Top,
+		row := prefix + lipgloss.JoinHorizontal(
+			lipgloss.Top,
 			name,
 			"  ",
 			hostLabel,
