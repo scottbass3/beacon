@@ -216,7 +216,7 @@ func (c *DockerHubClient) doJSON(ctx context.Context, method, endpoint string, b
 		return DockerHubRateLimit{}, err
 	}
 	resp, err := c.httpClient.Do(req)
-	c.logRequest(req, resp)
+	logRequestWithLogger(c.logger, req, resp)
 	if err != nil {
 		return DockerHubRateLimit{}, err
 	}
@@ -236,22 +236,6 @@ func (c *DockerHubClient) doJSON(ctx context.Context, method, endpoint string, b
 		return rateLimit, nil
 	}
 	return rateLimit, json.NewDecoder(resp.Body).Decode(out)
-}
-
-func (c *DockerHubClient) logRequest(req *http.Request, resp *http.Response) {
-	if c.logger == nil {
-		return
-	}
-	status := 0
-	if resp != nil {
-		status = resp.StatusCode
-	}
-	c.logger(RequestLog{
-		Method:  req.Method,
-		URL:     req.URL.String(),
-		Headers: cloneHeader(req.Header),
-		Status:  status,
-	})
 }
 
 type dockerHubSearchResponse struct {

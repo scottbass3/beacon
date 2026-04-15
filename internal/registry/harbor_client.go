@@ -169,7 +169,7 @@ func (c *HarborClient) doJSON(ctx context.Context, method, endpoint string, body
 	}
 
 	resp, err := c.httpClient.Do(req)
-	c.logRequest(req, resp)
+	logRequestWithLogger(c.logger, req, resp)
 	if err != nil {
 		return err
 	}
@@ -191,18 +191,13 @@ func (c *HarborClient) getManifest(ctx context.Context, image, reference string)
 	if err != nil {
 		return ManifestV2{}, err
 	}
-	req.Header.Set("Accept", strings.Join([]string{
-		"application/vnd.docker.distribution.manifest.v2+json",
-		"application/vnd.oci.image.manifest.v1+json",
-		"application/vnd.docker.distribution.manifest.list.v2+json",
-		"application/vnd.oci.image.index.v1+json",
-	}, ", "))
+	req.Header.Set("Accept", manifestAcceptHeader)
 	if !c.auth.Harbor.Anonymous {
 		req.SetBasicAuth(c.auth.Harbor.Username, c.auth.Harbor.Password)
 	}
 
 	resp, err := c.httpClient.Do(req)
-	c.logRequest(req, resp)
+	logRequestWithLogger(c.logger, req, resp)
 	if err != nil {
 		return ManifestV2{}, err
 	}
@@ -230,7 +225,7 @@ func (c *HarborClient) getConfig(ctx context.Context, image, digest string) (Con
 	}
 
 	resp, err := c.httpClient.Do(req)
-	c.logRequest(req, resp)
+	logRequestWithLogger(c.logger, req, resp)
 	if err != nil {
 		return ConfigV2{}, err
 	}
@@ -245,22 +240,6 @@ func (c *HarborClient) getConfig(ctx context.Context, image, digest string) (Con
 		return ConfigV2{}, err
 	}
 	return cfg, nil
-}
-
-func (c *HarborClient) logRequest(req *http.Request, resp *http.Response) {
-	if c.logger == nil {
-		return
-	}
-	status := 0
-	if resp != nil {
-		status = resp.StatusCode
-	}
-	c.logger(RequestLog{
-		Method:  req.Method,
-		URL:     req.URL.String(),
-		Headers: cloneHeader(req.Header),
-		Status:  status,
-	})
 }
 
 type harborProject struct {

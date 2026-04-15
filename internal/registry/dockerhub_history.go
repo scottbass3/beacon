@@ -29,12 +29,7 @@ func (c *DockerHubClient) getRegistryManifest(ctx context.Context, image, refere
 	if err != nil {
 		return ManifestV2{}, err
 	}
-	req.Header.Set("Accept", strings.Join([]string{
-		"application/vnd.docker.distribution.manifest.v2+json",
-		"application/vnd.oci.image.manifest.v1+json",
-		"application/vnd.docker.distribution.manifest.list.v2+json",
-		"application/vnd.oci.image.index.v1+json",
-	}, ", "))
+	req.Header.Set("Accept", manifestAcceptHeader)
 
 	resp, err := c.doRegistryRequest(ctx, req, image)
 	if err != nil {
@@ -79,7 +74,7 @@ func (c *DockerHubClient) getRegistryConfig(ctx context.Context, image, digest s
 
 func (c *DockerHubClient) doRegistryRequest(ctx context.Context, req *http.Request, image string) (*http.Response, error) {
 	resp, err := c.httpClient.Do(req)
-	c.logRequest(req, resp)
+	logRequestWithLogger(c.logger, req, resp)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +109,7 @@ func (c *DockerHubClient) doRegistryRequest(ctx context.Context, req *http.Reque
 	retryReq.Header.Set("Authorization", "Bearer "+token)
 
 	retryResp, retryErr := c.httpClient.Do(retryReq)
-	c.logRequest(retryReq, retryResp)
+	logRequestWithLogger(c.logger, retryReq, retryResp)
 	if retryErr != nil {
 		return nil, retryErr
 	}

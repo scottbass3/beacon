@@ -95,7 +95,7 @@ func (c *HTTPClient) listRepositories(ctx context.Context) ([]string, error) {
 	}
 
 	resp, err := c.httpClient.Do(req)
-	c.logRequest(req, resp)
+	logRequestWithLogger(c.logger, req, resp)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +127,7 @@ func (c *HTTPClient) listTags(ctx context.Context, repository string) ([]Tag, er
 	}
 
 	resp, err := c.httpClient.Do(req)
-	c.logRequest(req, resp)
+	logRequestWithLogger(c.logger, req, resp)
 	if err != nil {
 		return nil, err
 	}
@@ -161,18 +161,13 @@ func (c *HTTPClient) getManifest(ctx context.Context, image, reference string) (
 	if err != nil {
 		return ManifestV2{}, err
 	}
-	req.Header.Set("Accept", strings.Join([]string{
-		"application/vnd.docker.distribution.manifest.v2+json",
-		"application/vnd.oci.image.manifest.v1+json",
-		"application/vnd.docker.distribution.manifest.list.v2+json",
-		"application/vnd.oci.image.index.v1+json",
-	}, ", "))
+	req.Header.Set("Accept", manifestAcceptHeader)
 	if err := c.applyAuth(ctx, req); err != nil {
 		return ManifestV2{}, err
 	}
 
 	resp, err := c.httpClient.Do(req)
-	c.logRequest(req, resp)
+	logRequestWithLogger(c.logger, req, resp)
 	if err != nil {
 		return ManifestV2{}, err
 	}
@@ -200,7 +195,7 @@ func (c *HTTPClient) getConfig(ctx context.Context, image, digest string) (Confi
 	}
 
 	resp, err := c.httpClient.Do(req)
-	c.logRequest(req, resp)
+	logRequestWithLogger(c.logger, req, resp)
 	if err != nil {
 		return ConfigV2{}, err
 	}
@@ -234,22 +229,6 @@ func (c *HTTPClient) applyAuth(ctx context.Context, req *http.Request) error {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	return nil
-}
-
-func (c *HTTPClient) logRequest(req *http.Request, resp *http.Response) {
-	if c.logger == nil {
-		return
-	}
-	status := 0
-	if resp != nil {
-		status = resp.StatusCode
-	}
-	c.logger(RequestLog{
-		Method:  req.Method,
-		URL:     req.URL.String(),
-		Headers: cloneHeader(req.Header),
-		Status:  status,
-	})
 }
 
 func (c *HTTPClient) getRegistryV2Token(ctx context.Context) (string, error) {
@@ -317,7 +296,7 @@ func (c *HTTPClient) fetchRegistryV2Token(ctx context.Context) (string, time.Tim
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := c.httpClient.Do(req)
-	c.logRequest(req, resp)
+	logRequestWithLogger(c.logger, req, resp)
 	if err != nil {
 		return "", time.Time{}, "", err
 	}

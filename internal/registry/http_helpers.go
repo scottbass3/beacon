@@ -6,6 +6,12 @@ import (
 	"strings"
 )
 
+// manifestAcceptHeader is the Accept value for fetching OCI/Docker manifests.
+const manifestAcceptHeader = "application/vnd.docker.distribution.manifest.v2+json, " +
+	"application/vnd.oci.image.manifest.v1+json, " +
+	"application/vnd.docker.distribution.manifest.list.v2+json, " +
+	"application/vnd.oci.image.index.v1+json"
+
 func cloneHeader(header http.Header) map[string][]string {
 	if len(header) == 0 {
 		return nil

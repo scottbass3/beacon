@@ -140,7 +140,7 @@ func (c *GitHubContainerClient) doWithAuth(ctx context.Context, req *http.Reques
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := c.httpClient.Do(req)
-	c.logRequest(req, resp)
+	logRequestWithLogger(c.logger, req, resp)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +176,7 @@ func (c *GitHubContainerClient) doWithAuth(ctx context.Context, req *http.Reques
 	retryReq.Header.Set("Authorization", "Bearer "+token)
 
 	retryResp, retryErr := c.httpClient.Do(retryReq)
-	c.logRequest(retryReq, retryResp)
+	logRequestWithLogger(c.logger, retryReq, retryResp)
 	if retryErr != nil {
 		return nil, retryErr
 	}
@@ -189,12 +189,7 @@ func (c *GitHubContainerClient) getManifest(ctx context.Context, image, referenc
 	if err != nil {
 		return ManifestV2{}, err
 	}
-	req.Header.Set("Accept", strings.Join([]string{
-		"application/vnd.docker.distribution.manifest.v2+json",
-		"application/vnd.oci.image.manifest.v1+json",
-		"application/vnd.docker.distribution.manifest.list.v2+json",
-		"application/vnd.oci.image.index.v1+json",
-	}, ", "))
+	req.Header.Set("Accept", manifestAcceptHeader)
 
 	resp, err := c.doWithAuth(ctx, req, image)
 	if err != nil {
@@ -274,22 +269,6 @@ func (c *GitHubContainerClient) resolve(p string, query url.Values) string {
 
 func (c *GitHubContainerClient) resolveNext(next string) string {
 	return resolveNextURL(c.baseURL, next)
-}
-
-func (c *GitHubContainerClient) logRequest(req *http.Request, resp *http.Response) {
-	if c.logger == nil {
-		return
-	}
-	status := 0
-	if resp != nil {
-		status = resp.StatusCode
-	}
-	c.logger(RequestLog{
-		Method:  req.Method,
-		URL:     req.URL.String(),
-		Headers: cloneHeader(req.Header),
-		Status:  status,
-	})
 }
 
 type githubContainerTagsResponse struct {
