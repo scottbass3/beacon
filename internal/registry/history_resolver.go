@@ -34,22 +34,5 @@ func listTagHistoryFromManifest(
 	if err != nil {
 		return nil, err
 	}
-	return toHistoryEntries(Build(manifest, cfg)), nil
-}
-
-func toHistoryEntries(entries []Entry) []HistoryEntry {
-	if len(entries) == 0 {
-		return nil
-	}
-	out := make([]HistoryEntry, 0, len(entries))
-	for _, entry := range entries {
-		out = append(out, HistoryEntry{
-			CreatedAt:  entry.CreatedAt,
-			CreatedBy:  entry.CreatedBy,
-			Comment:    entry.Comment,
-			SizeBytes:  entry.SizeBytes,
-			EmptyLayer: entry.EmptyLayer,
-		})
-	}
-	return out
+	return Build(manifest, cfg), nil
 }

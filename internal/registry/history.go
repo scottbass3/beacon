@@ -43,15 +43,7 @@ type ConfigHistory struct {
 	EmptyLayer bool   `json:"empty_layer"`
 }
 
-type Entry struct {
-	CreatedAt  time.Time
-	CreatedBy  string
-	Comment    string
-	SizeBytes  int64
-	EmptyLayer bool
-}
-
-func Build(manifest ManifestV2, cfg ConfigV2) []Entry {
+func Build(manifest ManifestV2, cfg ConfigV2) []HistoryEntry {
 	if len(cfg.History) == 0 {
 		return nil
 	}
@@ -62,9 +54,9 @@ func Build(manifest ManifestV2, cfg ConfigV2) []Entry {
 	}
 
 	layerIndex := 0
-	entries := make([]Entry, 0, len(cfg.History))
+	entries := make([]HistoryEntry, 0, len(cfg.History))
 	for _, entry := range cfg.History {
-		h := Entry{
+		h := HistoryEntry{
 			CreatedAt:  parseDockerTime(entry.Created),
 			CreatedBy:  strings.TrimSpace(entry.CreatedBy),
 			Comment:    strings.TrimSpace(entry.Comment),
